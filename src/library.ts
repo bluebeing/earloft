@@ -3,7 +3,7 @@ import { api, apiJson, getToken } from './api';
 import * as idb from './db';
 import { parseFeed, type ParsedFeed } from './feed';
 import { DEFAULT_SETTINGS, emit, indexEpisodes, rebuildIndex, set, state, toast } from './store';
-import type { ApplePodcast, Episode, EpisodeState, KvRecord, Podcast, Settings } from './types';
+import type { ApplePodcast, Category, Episode, EpisodeState, KvRecord, Podcast, Settings } from './types';
 import { looksPrivate, podcastIdFor, pool } from './util';
 
 const kvMeta = new Map<string, KvRecord>();
@@ -32,6 +32,7 @@ export async function init() {
 function applyKv(rec: KvRecord) {
   kvMeta.set(rec.key, rec);
   if (rec.key === 'queue' && Array.isArray(rec.value)) state.queue = rec.value as string[];
+  if (rec.key === 'categories' && Array.isArray(rec.value)) state.categories = rec.value as Category[];
   if (rec.key === 'settings' && rec.value) state.settings = { ...DEFAULT_SETTINGS, ...(rec.value as Settings) };
   if (rec.key === 'nowPlaying' && typeof rec.value === 'string' && !state.currentId) state.currentId = rec.value;
 }
@@ -264,6 +265,51 @@ export const playNext = (id: string) => setQueue([id, ...state.queue.filter((x) 
 export const playLast = (id: string) => setQueue([...state.queue.filter((x) => x !== id), id]);
 export const removeFromQueue = (id: string) => setQueue(state.queue.filter((x) => x !== id));
 
+// ---------------------------------------------------------------------------
+// Kategorie (vlastní, podcast může být ve více kategoriích)
+
+async function setCategories(list: Category[]) {
+  state.categories = list;
+  emit();
+  await writeKv('categories', list);
+}
+
+export async function createCategory(name: string, podcastId?: string): Promise<string> {
+  const id = Math.random().toString(36).slice(2, 10);
+  await setCategories([...state.categories, { id, name: name.trim(), podcastIds: podcastId ? [podcastId] : [] }]);
+  return id;
+}
+
+export const renameCategory = (id: string, name: string) =>
+  setCategories(state.categories.map((c) => (c.id === id ? { ...c, name: name.trim() || c.name } : c)));
+
+export const deleteCategory = (id: string) => setCategories(state.categories.filter((c) => c.id !== id));
+
+export function moveCategory(id: string, delta: number) {
+  const list = [...state.categories];
+  const i = list.findIndex((c) => c.id === id);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  return setCategories(list);
+}
+
+export const togglePodcastCategory = (categoryId: string, podcastId: string) =>
+  setCategories(
+    state.categories.map((c) =>
+      c.id !== categoryId
+        ? c
+        : { ...c, podcastIds: c.podcastIds.includes(podcastId) ? c.podcastIds.filter((x) => x !== podcastId) : [...c.podcastIds, podcastId] },
+    ),
+  );
+
+/** Filtr podle kategorie: null = vše, '__none' = bez kategorie */
+export function inCategory(podcastId: string, categoryId: string | null): boolean {
+  if (!categoryId) return true;
+  if (categoryId === '__none') return !state.categories.some((c) => c.podcastIds.includes(podcastId));
+  return !!state.categories.find((c) => c.id === categoryId)?.podcastIds.includes(podcastId);
+}
+
 export async function updateSettings(patch: Partial<Settings>) {
   state.settings = { ...state.settings, ...patch };
   emit();
@@ -435,6 +481,7 @@ export async function resetLocal() {
     byPodcast: new Map(),
     states: new Map(),
     queue: [],
+    categories: [],
     settings: { ...DEFAULT_SETTINGS },
     currentId: null,
   });

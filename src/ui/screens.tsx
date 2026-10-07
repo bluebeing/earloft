@@ -7,6 +7,7 @@ import {
   appleTop,
   getEpisodeNotes,
   getPodcast,
+  inCategory,
   isSubscribed,
   markPlayed,
   previewFeed,
@@ -23,6 +24,7 @@ import { toast, useStore } from '../store';
 import type { ApplePodcast, Episode } from '../types';
 import { appleIdFromUrl, formatDate, formatDuration } from '../util';
 import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, showActions } from './common';
+import { CategoryChips, categoryNamesFor, pickCategories, useCategoryFilter } from './categories';
 import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from './icons';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,7 @@ import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from '
 
 export function ListenNow() {
   const s = useStore();
+  const [cat, setCat] = useCategoryFilter('listen');
 
   const inProgress =
       [...s.states.values()]
@@ -42,7 +45,7 @@ export function ListenNow() {
 
   const latest = (() => {
     const out: Episode[] = [];
-    for (const p of activePodcasts()) out.push(...(s.byPodcast.get(p.id) ?? []).slice(0, 5));
+    for (const p of activePodcasts()) if (inCategory(p.id, cat)) out.push(...(s.byPodcast.get(p.id) ?? []).slice(0, 5));
     return out
       .filter((e) => !s.states.get(e.id)?.played)
       .sort((a, b) => b.pubDate - a.pubDate)
@@ -94,9 +97,11 @@ export function ListenNow() {
         </section>
       )}
 
-      {latest.length > 0 && (
+      {(latest.length > 0 || cat) && (
         <section>
           <h2 class="section-title">Nové epizody</h2>
+          <CategoryChips value={cat} onChange={setCat} />
+          {latest.length === 0 && <Empty title="V této kategorii nic nového" />}
           <div class="list">
             {latest.map((ep) => (
               <EpisodeRow ep={ep} showPodcast />
@@ -125,7 +130,9 @@ function ContinueCard({ ep }: { ep: Episode }) {
 
 export function Library() {
   const s = useStore();
-  const pods = activePodcasts().sort((a, b) => {
+  const [cat, setCat] = useCategoryFilter('library');
+  const all = activePodcasts();
+  const pods = all.filter((p) => inCategory(p.id, cat)).sort((a, b) => {
     const la = s.byPodcast.get(a.id)?.[0]?.pubDate ?? 0;
     const lb = s.byPodcast.get(b.id)?.[0]?.pubDate ?? 0;
     return lb - la;
@@ -133,7 +140,10 @@ export function Library() {
   return (
     <div class="screen">
       <Header title="Knihovna" large />
-      {pods.length === 0 ? (
+      {all.length > 0 && <CategoryChips value={cat} onChange={setCat} showManage />}
+      {all.length > 0 && pods.length === 0 ? (
+        <Empty title="Prázdná kategorie">Podcast do kategorie přidáš v jeho detailu.</Empty>
+      ) : pods.length === 0 ? (
         <Empty title="Knihovna je prázdná">
           Přidej první podcast v <a href="#/search">Hledat</a>.
         </Empty>
@@ -195,6 +205,7 @@ export function PodcastPage({ id }: { id: string }) {
 
   const menu = () =>
     showActions(pod.title, [
+      { label: 'Kategorie…', onClick: () => pickCategories(pod.id) },
       { label: 'Obnovit feed', onClick: () => void refreshPodcast(pod, true).then(() => toast('Obnoveno')) },
       { label: pod.isPrivate ? 'Označit jako veřejný' : 'Označit jako soukromý', onClick: () => void setPodcastPrivate(pod.id, !pod.isPrivate) },
       {
@@ -248,6 +259,11 @@ export function PodcastPage({ id }: { id: string }) {
             </span>
           )}
         </div>
+        {subscribed && (
+          <button class="chip category-chip" onClick={() => pickCategories(pod.id)}>
+            {categoryNamesFor(pod.id).join(' · ') || '+ Přidat do kategorie'}
+          </button>
+        )}
         {pod.fetchError && <div class="error-box">Poslední obnovení selhalo: {pod.fetchError}</div>}
         {pod.description && (
           <p class={`hero-desc${expanded ? ' expanded' : ''}`} onClick={() => setExpanded(!expanded)}>

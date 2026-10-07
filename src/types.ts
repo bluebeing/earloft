@@ -53,6 +53,12 @@ export interface KvRecord<T = unknown> {
   dirty?: boolean;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  podcastIds: string[];
+}
+
 export interface Settings {
   rate: number;
   skipBack: number;

@@ -4,6 +4,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { init, refreshAll, sync } from './library';
 import { restoreLastEpisode } from './player';
 import { set, toast, useStore } from './store';
+import { CategoriesPage, CategoryPickerHost } from './ui/categories';
 import { ActionSheetHost, useRoute } from './ui/common';
 import { TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
 import { MiniPlayer, NowPlaying } from './ui/player-ui';
@@ -33,6 +34,8 @@ function Screen({ route }: { route: string[] }) {
       return <Settings />;
     case 'podcast':
       return <PodcastPage id={id} key={id} />;
+    case 'categories':
+      return <CategoriesPage />;
     case 'episode':
       return <EpisodePage id={id} key={id} />;
     default:
@@ -107,6 +110,7 @@ function App() {
       </div>
       <NowPlaying />
       <ActionSheetHost />
+      <CategoryPickerHost />
       {s.toast && <div class="toast">{s.toast}</div>}
     </>
   );
