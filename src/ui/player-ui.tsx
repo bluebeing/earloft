@@ -79,7 +79,7 @@ export function NowPlaying() {
         <button class="np-close" onClick={close} aria-label="Zavřít">
           <ChevronDownIcon size={28} />
         </button>
-        <div class={`np-art${s.playing ? ' playing' : ''}`}>
+        <div class="np-art">
           <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={0} class="fluid" />
         </div>
         <div class="np-info">

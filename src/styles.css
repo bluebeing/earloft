@@ -768,20 +768,17 @@ main.has-mini {
   padding: 4px 16px 8px;
 }
 .np-art {
-  will-change: width;
-  width: 78%;
-  margin: 16px auto 0;
-  transition: width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.np-art.playing {
-  width: 100%;
+  /* Pevná velikost (nezvětšuje se při přehrávání) a omezená výškou displeje,
+     aby se ovládání, rychlost i poznámky vešly bez scrollování */
+  width: min(100%, max(160px, calc(100dvh - 470px - var(--safe-t) - var(--safe-b))));
+  margin: 12px auto 0;
 }
 .np-art .artwork {
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
 }
 .np-info {
-  margin-top: 28px;
+  margin-top: 22px;
 }
 .np-title {
   font-size: 20px;
