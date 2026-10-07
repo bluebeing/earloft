@@ -1,5 +1,5 @@
 import { getPodcast, getState, markPlayed, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
-import { emit, set, state } from './store';
+import { emit, set, state, tick } from './store';
 
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
 const audio = new Audio();
@@ -127,7 +127,7 @@ audio.addEventListener('timeupdate', () => {
   const now = Date.now();
   if (now - lastEmit > 500) {
     lastEmit = now;
-    set({ position: audio.currentTime, duration: isFinite(audio.duration) ? audio.duration : state.duration });
+    tick(audio.currentTime, isFinite(audio.duration) ? audio.duration : state.duration);
     updatePositionState();
   }
   saveProgress();

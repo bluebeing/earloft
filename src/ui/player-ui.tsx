@@ -1,13 +1,14 @@
 import { useState } from 'preact/hooks';
 import { getPodcast } from '../library';
 import { seekTo, setRate, setSleepTimer, skipBack, skipForward, togglePlay } from '../player';
-import { set, useStore } from '../store';
+import { set, useStore, useTick } from '../store';
 import { formatClock } from '../util';
-import { Artwork, go, showActions } from './common';
+import { Artwork, go, showActions, useDismiss } from './common';
 import { ChevronDownIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon } from './icons';
 
 export function MiniPlayer() {
   const s = useStore();
+  useTick();
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
   if (!ep) return null;
   const pod = getPodcast(ep.podcastId);
@@ -48,11 +49,13 @@ const RATES = [0.8, 1, 1.1, 1.2, 1.3, 1.5, 1.75, 2];
 
 export function NowPlaying() {
   const s = useStore();
+  useTick(s.nowPlayingOpen);
   const [scrub, setScrub] = useState<number | null>(null);
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
-  if (!s.nowPlayingOpen || !ep) return null;
+  const visible = s.nowPlayingOpen && !!ep;
+  const { ref, closing, close } = useDismiss(() => set({ nowPlayingOpen: false }), visible, true);
+  if (!visible || !ep) return null;
   const pod = getPodcast(ep.podcastId);
-  const close = () => set({ nowPlayingOpen: false });
   const dur = s.duration || ep.duration || 0;
   const pos = scrub ?? s.position;
 
@@ -71,7 +74,7 @@ export function NowPlaying() {
   const sleepLabel = s.sleepAtEnd ? 'Konec ep.' : s.sleepAt ? `${Math.max(1, Math.ceil((s.sleepAt - Date.now()) / 60000))} min` : '';
 
   return (
-    <div class="now-playing">
+    <div class={`now-playing${closing ? ' closing' : ''}`} ref={ref}>
       <div class="np-inner">
         <button class="np-close" onClick={close} aria-label="Zavřít">
           <ChevronDownIcon size={28} />
@@ -104,6 +107,7 @@ export function NowPlaying() {
               seekTo(Number((e.target as HTMLInputElement).value));
               setScrub(null);
             }}
+            class={scrub !== null ? 'scrubbing' : ''}
             style={{ '--pct': `${dur ? (pos / dur) * 100 : 0}%` }}
           />
           <div class="np-times">

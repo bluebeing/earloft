@@ -23,7 +23,7 @@ import { playEpisode, seekTo } from '../player';
 import { toast, useStore } from '../store';
 import type { ApplePodcast, Episode } from '../types';
 import { appleIdFromUrl, formatDate, formatDuration } from '../util';
-import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, showActions } from './common';
+import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, goBack, showActions } from './common';
 import { CategoryChips, categoryNamesFor, pickCategories, useCategoryFilter } from './categories';
 import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from './icons';
 
@@ -219,7 +219,7 @@ export function PodcastPage({ id }: { id: string }) {
         onClick: () => {
           if (confirm(`Opravdu zrušit odběr „${pod.title}“?`)) {
             void unsubscribe(pod.id);
-            history.back();
+            goBack();
           }
         },
       },

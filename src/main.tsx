@@ -1,11 +1,11 @@
 import { render } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useLayoutEffect } from 'preact/hooks';
 import { registerSW } from 'virtual:pwa-register';
 import { init, refreshAll, sync } from './library';
 import { restoreLastEpisode } from './player';
 import { set, toast, useStore } from './store';
 import { CategoriesPage, CategoryPickerHost } from './ui/categories';
-import { ActionSheetHost, useRoute } from './ui/common';
+import { ActionSheetHost, scrollTargetFor, useRoute } from './ui/common';
 import { TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
 import { MiniPlayer, NowPlaying } from './ui/player-ui';
 import { EpisodePage, Library, ListenNow, NotFound, PodcastPage, Search } from './ui/screens';
@@ -48,7 +48,7 @@ let lastTab = '';
 
 function App() {
   const s = useStore();
-  const route = useRoute();
+  const { route, hash, dir } = useRoute();
 
   useEffect(() => {
     const onUnauthorized = () => set({ authed: false });
@@ -82,9 +82,10 @@ function App() {
     return () => document.removeEventListener('visibilitychange', kick);
   }, [s.authed, s.ready]);
 
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [route.join('/')]);
+  // Po přechodu: zpět → kde jsi byl, vpřed → nahoru
+  useLayoutEffect(() => {
+    window.scrollTo(0, scrollTargetFor(hash, dir));
+  }, [hash]);
 
   if (!s.ready) return null;
   if (!s.authed) return <Login />;
@@ -95,7 +96,9 @@ function App() {
   return (
     <>
       <main class={s.currentId ? 'has-mini' : ''}>
-        <Screen route={route} />
+        <div class={`page page-${dir}`} key={hash}>
+          <Screen route={route} />
+        </div>
       </main>
       <div class="bottom-chrome">
         <MiniPlayer />
@@ -111,7 +114,11 @@ function App() {
       <NowPlaying />
       <ActionSheetHost />
       <CategoryPickerHost />
-      {s.toast && <div class="toast">{s.toast}</div>}
+      {s.toast && (
+        <div class="toast" key={s.toast}>
+          {s.toast}
+        </div>
+      )}
     </>
   );
 }

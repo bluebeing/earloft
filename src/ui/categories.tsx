@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { activePodcasts, createCategory, deleteCategory, moveCategory, renameCategory, togglePodcastCategory } from '../library';
 import { state, useStore } from '../store';
-import { Header } from './common';
+import { Header, useDismiss } from './common';
 import { CheckIcon, PlusIcon } from './icons';
 
 /** Zvolená kategorie zapamatovaná pro danou obrazovku (jen na tomto zařízení). */
@@ -76,12 +76,15 @@ export function CategoryPickerHost() {
     openPicker = setPodcastId;
     return () => void (openPicker = null);
   }, []);
+  const { ref, closing, close } = useDismiss(
+    () => {
+      setPodcastId(null);
+      setName('');
+    },
+    !!podcastId,
+    true,
+  );
   if (!podcastId) return null;
-
-  const close = () => {
-    setPodcastId(null);
-    setName('');
-  };
   const add = async (e: Event) => {
     e.preventDefault();
     const value = name.trim();
@@ -91,8 +94,8 @@ export function CategoryPickerHost() {
   };
 
   return (
-    <div class="sheet-backdrop" onClick={close}>
-      <div class="action-sheet" onClick={(e) => e.stopPropagation()}>
+    <div class={`sheet-backdrop${closing ? ' closing' : ''}`} onClick={close}>
+      <div class="action-sheet" ref={ref} onClick={(e) => e.stopPropagation()}>
         <div class="action-group">
           <div class="action-title">Kategorie podcastu</div>
           {s.categories.map((c) => {

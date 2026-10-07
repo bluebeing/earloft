@@ -4,7 +4,7 @@ import * as idb from './db';
 import { parseFeed, type ParsedFeed } from './feed';
 import { DEFAULT_SETTINGS, emit, indexEpisodes, rebuildIndex, set, state, toast } from './store';
 import type { ApplePodcast, Category, Episode, EpisodeState, KvRecord, Podcast, Settings } from './types';
-import { looksPrivate, podcastIdFor, pool } from './util';
+import { hashId, looksPrivate, podcastIdFor, pool } from './util';
 
 const kvMeta = new Map<string, KvRecord>();
 const LAST_SYNC_KEY = 'podcasty.lastSync';
@@ -52,7 +52,11 @@ interface FetchResult {
   parsed?: ParsedFeed;
   etag: string | null;
   lastModified: string | null;
+  contentHash?: string;
 }
+
+/** Pustí prohlížeč ke slovu (vykreslení, dotyk) před náročnou prací. */
+const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
 async function fetchFeed(feedUrl: string, podcastId: string, cond?: Podcast): Promise<FetchResult> {
   const headers: Record<string, string> = {};
@@ -61,13 +65,18 @@ async function fetchFeed(feedUrl: string, podcastId: string, cond?: Podcast): Pr
   const res = await api(`/api/feed?url=${encodeURIComponent(feedUrl)}`, { headers });
   const etag = res.headers.get('etag');
   const lastModified = res.headers.get('last-modified');
-  if (res.status === 304) return { notModified: true, etag, lastModified };
-  const parsed = parseFeed(await res.text(), podcastId);
-  return { notModified: false, parsed, etag, lastModified };
+  if (res.status === 304) return { notModified: true, etag, lastModified, contentHash: cond?.contentHash };
+  const text = await res.text();
+  // Mnoho serverů ETag nepodporuje – feed beze změny poznáme podle otisku a nemusíme ho parsovat
+  const contentHash = `${text.length}:${hashId(text)}`;
+  if (cond?.contentHash === contentHash) return { notModified: true, etag, lastModified, contentHash };
+  await yieldToMain();
+  const parsed = parseFeed(text, podcastId);
+  return { notModified: false, parsed, etag, lastModified, contentHash };
 }
 
 function storeEpisodes(podcastId: string, episodes: Episode[]) {
-  for (const [id, e] of state.episodes) if (e.podcastId === podcastId) state.episodes.delete(id);
+  for (const e of state.byPodcast.get(podcastId) ?? []) state.episodes.delete(e.id);
   for (const e of episodes) state.episodes.set(e.id, e);
   indexEpisodes(podcastId);
 }
@@ -77,7 +86,8 @@ export async function refreshPodcast(p: Podcast, force = false) {
     // Bez uložených epizod nemá smysl podmíněný dotaz (304 by nic nepřinesl)
     const hasEpisodes = (state.byPodcast.get(p.id)?.length ?? 0) > 0;
     const r = await fetchFeed(p.feedUrl, p.id, force || !hasEpisodes ? undefined : p);
-    const next: Podcast = { ...state.podcasts.get(p.id)!, lastFetchedAt: Date.now(), fetchError: null, etag: r.etag, lastModified: r.lastModified };
+    const prev = state.podcasts.get(p.id)!;
+    const next: Podcast = { ...prev, lastFetchedAt: Date.now(), fetchError: null, etag: r.etag, lastModified: r.lastModified, contentHash: r.contentHash };
     if (r.parsed) {
       next.description = r.parsed.description;
       next.link = r.parsed.link ?? undefined;
@@ -90,6 +100,8 @@ export async function refreshPodcast(p: Podcast, force = false) {
     }
     state.podcasts.set(p.id, next);
     await idb.putPodcast(next);
+    // Beze změny není co překreslovat
+    if (!r.parsed && !prev.fetchError) return;
   } catch (e) {
     const next = { ...state.podcasts.get(p.id)!, fetchError: e instanceof Error ? e.message : String(e) };
     state.podcasts.set(p.id, next);
@@ -131,6 +143,7 @@ export async function previewFeed(feedUrl: string, hint?: Partial<Podcast>): Pro
     link: parsed.link ?? undefined,
     etag: r.etag,
     lastModified: r.lastModified,
+    contentHash: r.contentHash,
   };
   previews.set(id, p);
   previewNotes.set(id, parsed.notes);

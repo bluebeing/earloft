@@ -15,6 +15,7 @@ export interface Podcast {
   description?: string;
   link?: string;
   etag?: string | null;
+  contentHash?: string;
   lastModified?: string | null;
   lastFetchedAt?: number;
   fetchError?: string | null;

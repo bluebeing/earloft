@@ -99,6 +99,27 @@ export function rebuildIndex() {
   state.byPodcast = map;
 }
 
+// ---------------------------------------------------------------------------
+// „Tik“ přehrávače: pozice se mění 2× za sekundu – překreslí jen komponenty, které ji zobrazují
+
+const tickListeners = new Set<() => void>();
+
+export function tick(position: number, duration: number) {
+  state.position = position;
+  state.duration = duration;
+  tickListeners.forEach((l) => l());
+}
+
+/** Překreslení při změně pozice přehrávání (jen když active = true). */
+export function useTick(active = true) {
+  const [, force] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!active) return;
+    tickListeners.add(force as () => void);
+    return () => void tickListeners.delete(force as () => void);
+  }, [active]);
+}
+
 let toastTimer: number | undefined;
 export function toast(msg: string) {
   clearTimeout(toastTimer);

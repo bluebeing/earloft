@@ -97,15 +97,29 @@ main.has-mini {
   z-index: 10;
   margin: 0 -16px;
   padding: calc(var(--safe-t) + 6px) 16px 6px;
+  background: transparent;
+  border-bottom: 0.5px solid transparent;
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+}
+.topbar::before {
+  /* rozmazané pozadí jako samostatná vrstva → plynulé zesílení přes opacity */
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: var(--bg-chrome);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
+  opacity: 0;
+  transition: opacity 0.25s ease;
 }
-.topbar.large {
-  position: static;
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+.topbar.scrolled {
+  border-bottom-color: var(--sep);
+}
+.topbar.scrolled::before {
+  opacity: 1;
 }
 .topbar-row {
   display: grid;
@@ -120,6 +134,15 @@ main.has-mini {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.topbar-title.visible {
+  opacity: 1;
+  transform: none;
 }
 .topbar-actions {
   display: flex;
@@ -127,7 +150,7 @@ main.has-mini {
   min-width: 44px;
   gap: 4px;
 }
-.topbar h1 {
+.large-title {
   margin: 0 0 6px;
   font-size: 34px;
   font-weight: 700;
@@ -141,9 +164,6 @@ main.has-mini {
   min-height: 40px;
   color: var(--accent);
   border-radius: 50%;
-}
-.icon-btn:active {
-  opacity: 0.5;
 }
 .icon-btn.back {
   justify-content: start;
@@ -311,6 +331,11 @@ main.has-mini {
   height: 100%;
   object-fit: cover;
   display: block;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.artwork img.loaded {
+  opacity: 1;
 }
 .artwork.fluid {
   width: 100% !important;
@@ -461,9 +486,6 @@ main.has-mini {
 }
 .btn:disabled {
   opacity: 0.5;
-}
-.btn:active {
-  opacity: 0.7;
 }
 
 .segmented {
@@ -673,6 +695,7 @@ main.has-mini {
 }
 
 .mini-player {
+  animation: mini-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
   display: flex;
   align-items: center;
@@ -690,6 +713,7 @@ main.has-mini {
   bottom: -0.5px;
   height: 2px;
   background: var(--accent);
+  transition: width 0.5s linear;
 }
 .mini-text {
   flex: 1;
@@ -721,7 +745,12 @@ main.has-mini {
   z-index: 40;
   background: var(--bg);
   overflow-y: auto;
-  animation: slide-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  overscroll-behavior: contain;
+  animation: slide-up 0.38s cubic-bezier(0.2, 0.9, 0.25, 1);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.3);
+}
+.now-playing.closing {
+  animation: slide-down 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 .np-inner {
   max-width: 440px;
@@ -737,6 +766,7 @@ main.has-mini {
   padding: 4px 16px 8px;
 }
 .np-art {
+  will-change: width;
   width: 78%;
   margin: 16px auto 0;
   transition: width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -769,6 +799,7 @@ main.has-mini {
   margin-top: 22px;
 }
 .np-scrubber input[type='range'] {
+  transition: --pct 0.5s linear;
   width: 100%;
   height: 24px;
   margin: 0;
@@ -867,7 +898,13 @@ main.has-mini {
   width: 100%;
   max-width: 440px;
   padding: 0 8px calc(var(--safe-b) + 8px);
-  animation: slide-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: slide-up 0.32s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.sheet-backdrop.closing {
+  animation: fade-out 0.24s ease forwards;
+}
+.sheet-backdrop.closing .action-sheet {
+  animation: slide-down 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 .action-group {
   background: var(--bg-chrome);
@@ -930,7 +967,7 @@ main.has-mini {
   color: #fff;
   font-size: 14px;
   text-align: center;
-  animation: fade 0.2s;
+  animation: toast 3.5s ease both;
 }
 
 .spinner {
@@ -962,6 +999,143 @@ main.has-mini {
   color: var(--text);
   margin: 0 0 6px;
   font-size: 20px;
+}
+
+/* ---------- Přechody a odezva ---------- */
+
+@property --pct {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+.np-scrubber input.scrubbing {
+  transition: none;
+}
+
+/* Přechod mezi stránkami: vpřed zprava, zpět zleva, záložky prolnutím */
+.page-forward {
+  animation: page-in-right 0.34s cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+.page-back {
+  animation: page-in-left 0.34s cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+.page-tab {
+  animation: fade 0.22s ease;
+}
+
+.episode-row,
+.apple-row {
+  border-radius: 10px;
+  transition: background-color 0.2s ease;
+  /* dlouhé seznamy: prohlížeč nevykresluje řádky mimo obrazovku */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+.apple-row {
+  contain-intrinsic-size: auto 84px;
+}
+.episode-row:active,
+.apple-row:active {
+  background-color: var(--bg-elev);
+  transition-duration: 0s;
+}
+.grid-item,
+.card,
+.btn,
+.chip,
+.pill-btn,
+.play-pill,
+.icon-btn,
+.form-row.link,
+.action {
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.grid-item:active,
+.card:active {
+  transform: scale(0.97);
+}
+.btn:active,
+.chip:active,
+.pill-btn:active,
+.play-pill:active {
+  transform: scale(0.95);
+  opacity: 0.85;
+}
+.icon-btn:active {
+  transform: scale(0.88);
+}
+.np-play:active {
+  transform: scale(0.9);
+}
+.action:active,
+.form-row.link:active {
+  background-color: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.tabbar a {
+  transition: color 0.2s ease;
+}
+.tabbar a:active svg {
+  transform: scale(0.88);
+}
+.tabbar a svg {
+  transition: transform 0.15s ease;
+}
+
+@keyframes page-in-right {
+  from {
+    opacity: 0;
+    transform: translate3d(32px, 0, 0);
+  }
+}
+@keyframes page-in-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-24px, 0, 0);
+  }
+}
+@keyframes slide-down {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes mini-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.96);
+  }
+  8%,
+  88% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @keyframes spin {
