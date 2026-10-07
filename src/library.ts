@@ -73,7 +73,9 @@ function storeEpisodes(podcastId: string, episodes: Episode[]) {
 
 export async function refreshPodcast(p: Podcast, force = false) {
   try {
-    const r = await fetchFeed(p.feedUrl, p.id, force ? undefined : p);
+    // Bez uložených epizod nemá smysl podmíněný dotaz (304 by nic nepřinesl)
+    const hasEpisodes = (state.byPodcast.get(p.id)?.length ?? 0) > 0;
+    const r = await fetchFeed(p.feedUrl, p.id, force || !hasEpisodes ? undefined : p);
     const next: Podcast = { ...state.podcasts.get(p.id)!, lastFetchedAt: Date.now(), fetchError: null, etag: r.etag, lastModified: r.lastModified };
     if (r.parsed) {
       next.description = r.parsed.description;
