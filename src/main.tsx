@@ -6,7 +6,8 @@ import { restoreLastEpisode } from './player';
 import { set, toast, useStore } from './store';
 import { CategoriesPage, CategoryPickerHost } from './ui/categories';
 import { ActionSheetHost, scrollTargetFor, useRoute } from './ui/common';
-import { TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
+import { TabCalendar, TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
+import { Overview } from './ui/overview';
 import { MiniPlayer, NowPlaying } from './ui/player-ui';
 import { EpisodePage, Library, ListenNow, NotFound, PodcastPage, Search } from './ui/screens';
 import { Login, Settings } from './ui/settings';
@@ -17,6 +18,7 @@ registerSW({ immediate: true });
 const TABS = [
   { path: '', label: 'Poslouchat', Icon: TabListen },
   { path: 'library', label: 'Knihovna', Icon: TabLibrary },
+  { path: 'overview', label: 'Přehled', Icon: TabCalendar },
   { path: 'search', label: 'Hledat', Icon: TabSearch },
   { path: 'settings', label: 'Nastavení', Icon: TabSettings },
 ];
@@ -30,6 +32,8 @@ function Screen({ route }: { route: string[] }) {
       return <Library />;
     case 'search':
       return <Search />;
+    case 'overview':
+      return <Overview />;
     case 'settings':
       return <Settings />;
     case 'podcast':

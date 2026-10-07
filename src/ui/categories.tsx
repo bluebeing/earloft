@@ -29,7 +29,17 @@ export function useCategoryFilter(key: string): [string | null, (v: string | nul
   return [valid, set];
 }
 
-export function CategoryChips({ value, onChange, showManage }: { value: string | null; onChange: (v: string | null) => void; showManage?: boolean }) {
+export function CategoryChips({
+  value,
+  onChange,
+  showManage,
+  allowAll = true,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  showManage?: boolean;
+  allowAll?: boolean;
+}) {
   const s = useStore();
   if (!s.categories.length) {
     return showManage ? (
@@ -42,9 +52,11 @@ export function CategoryChips({ value, onChange, showManage }: { value: string |
   }
   return (
     <div class="chips">
-      <button class={`chip${value === null ? ' on' : ''}`} onClick={() => onChange(null)}>
-        Vše
-      </button>
+      {allowAll && (
+        <button class={`chip${value === null ? ' on' : ''}`} onClick={() => onChange(null)}>
+          Vše
+        </button>
+      )}
       {s.categories.map((c) => (
         <button class={`chip${value === c.id ? ' on' : ''}`} onClick={() => onChange(c.id)}>
           {c.name}

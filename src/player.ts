@@ -1,4 +1,5 @@
 import { getPodcast, getState, markPlayed, markSkipped, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
+import { flushStats, recordListening } from './stats';
 import { emit, set, state, tick } from './store';
 
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
@@ -9,6 +10,8 @@ let loadedId: string | null = null;
 let pendingSeek: number | null = null;
 let lastSaved = 0;
 let lastEmit = 0;
+/** Poslední pozice pro počítání odposlechnutého času (null = po skoku) */
+let lastTime: number | null = null;
 
 const PLAYED_THRESHOLD = 0.95;
 
@@ -126,6 +129,13 @@ audio.addEventListener('loadedmetadata', () => {
 
 audio.addEventListener('timeupdate', () => {
   const now = Date.now();
+  // Statistiky: počítá se jen plynulé přehrávání, ne skoky
+  if (!audio.paused && lastTime !== null) {
+    const delta = audio.currentTime - lastTime;
+    const ep = currentEpisode();
+    if (ep && delta > 0 && delta < 3) recordListening(ep.podcastId, delta, delta / (audio.playbackRate || 1));
+  }
+  lastTime = audio.currentTime;
   if (now - lastEmit > 500) {
     lastEmit = now;
     tick(audio.currentTime, isFinite(audio.duration) ? audio.duration : state.duration);
@@ -138,11 +148,14 @@ audio.addEventListener('timeupdate', () => {
   }
 });
 
+audio.addEventListener('seeking', () => (lastTime = null));
 audio.addEventListener('playing', () => set({ playing: true, buffering: false }));
 audio.addEventListener('play', () => set({ playing: true }));
 audio.addEventListener('waiting', () => set({ buffering: true }));
 audio.addEventListener('pause', () => {
   set({ playing: false, buffering: false });
+  lastTime = null;
+  flushStats();
   saveProgress(true);
   void push().catch(() => {});
 });
@@ -167,6 +180,7 @@ audio.addEventListener('error', () => {
 // Při schování appky uložit pozici a odeslat na server
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    flushStats();
     saveProgress(true);
     void push(true).catch(() => {});
   }

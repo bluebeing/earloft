@@ -131,7 +131,9 @@ function ContinueCard({ ep }: { ep: Episode }) {
 
 export function Library() {
   const s = useStore();
-  const [cat, setCat] = useCategoryFilter('library');
+  const [chosen, setCat] = useCategoryFilter('library');
+  // Knihovna nemá „Vše“ – bez volby se ukáže první kategorie
+  const cat = chosen ?? s.categories[0]?.id ?? null;
   const all = activePodcasts();
   const pods = all.filter((p) => inCategory(p.id, cat)).sort((a, b) => {
     const la = s.byPodcast.get(a.id)?.[0]?.pubDate ?? 0;
@@ -141,7 +143,7 @@ export function Library() {
   return (
     <div class="screen">
       <Header title="Knihovna" large />
-      {all.length > 0 && <CategoryChips value={cat} onChange={setCat} showManage />}
+      {all.length > 0 && <CategoryChips value={cat} onChange={setCat} showManage allowAll={false} />}
       {all.length > 0 && pods.length === 0 ? (
         <Empty title="Prázdná kategorie">Podcast do kategorie přidáš v jeho detailu.</Empty>
       ) : pods.length === 0 ? (

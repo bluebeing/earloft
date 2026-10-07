@@ -37,12 +37,15 @@ function applyKv(rec: KvRecord) {
   if (rec.key === 'nowPlaying' && typeof rec.value === 'string' && !state.currentId) state.currentId = rec.value;
 }
 
-async function writeKv(key: string, value: unknown) {
+export async function writeKv(key: string, value: unknown) {
   const rec: KvRecord = { key, value, updatedAt: Date.now(), dirty: true };
   kvMeta.set(key, rec);
   await idb.putKv(rec);
   schedulePush();
 }
+
+/** Záznamy kv podle prefixu (např. statistiky ze všech zařízení). */
+export const kvEntries = (prefix: string) => [...kvMeta.values()].filter((r) => r.key.startsWith(prefix));
 
 // ---------------------------------------------------------------------------
 // Feedy

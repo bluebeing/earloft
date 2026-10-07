@@ -11,7 +11,7 @@ import { BackIcon, CheckIcon, MoreIcon, PauseIcon, PlayIcon } from './icons';
 // Hash router: #/library, #/podcast/ID …
 
 export type NavDir = 'forward' | 'back' | 'tab' | 'none';
-export const TAB_ROOTS = ['#/', '#/library', '#/search', '#/settings'];
+export const TAB_ROOTS = ['#/', '#/library', '#/overview', '#/search', '#/settings'];
 
 const currentHash = () => (location.hash && location.hash !== '#' ? location.hash : '#/');
 /** Vlastní zásobník historie – podle něj poznáme směr navigace (animace) a kam vrátit scroll. */
