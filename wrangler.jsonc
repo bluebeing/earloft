@@ -11,8 +11,7 @@
     {
       "binding": "DB",
       "database_name": "podcasty",
-      // Po `wrangler d1 create podcasty` sem vlož skutečné ID
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "78a8fd94-3116-4858-aab7-b11acaec8219"
     }
   ],
   "observability": { "enabled": true }

@@ -59,11 +59,4 @@ export interface Settings {
   skipForward: number;
 }
 
-export interface ApplePodcast {
-  appleId: string;
-  title: string;
-  author: string;
-  artworkUrl: string;
-  feedUrl: string | null;
-  genre: string | null;
-}
+export type { ApplePodcast } from '../shared/apple';

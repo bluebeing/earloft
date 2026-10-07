@@ -1,3 +1,4 @@
+import { appleLookupUrl, appleSearchUrl, appleTopUrl, parseLookup, parseSearch, parseTop } from '../shared/apple';
 import { api, apiJson, getToken } from './api';
 import * as idb from './db';
 import { parseFeed, type ParsedFeed } from './feed';
@@ -195,9 +196,20 @@ export async function setPodcastPrivate(id: string, isPrivate: boolean) {
 // ---------------------------------------------------------------------------
 // Apple
 
-export const appleSearch = (q: string) => apiJson<ApplePodcast[]>(`/api/apple/search?q=${encodeURIComponent(q)}`);
-export const appleTop = () => apiJson<ApplePodcast[]>(`/api/apple/top?country=cz`);
-export const appleLookup = (id: string) => apiJson<ApplePodcast | null>(`/api/apple/lookup?id=${id}`);
+/** Apple API voláme přímo z prohlížeče (podporuje CORS); při chybě přes náš Worker. */
+async function appleDirect<T>(url: string, parse: (d: unknown) => T, fallback: string): Promise<T> {
+  try {
+    const res = await fetch(url);
+    if (res.ok) return parse(await res.json());
+  } catch {
+    /* blokováno / offline – zkusit server */
+  }
+  return apiJson<T>(fallback);
+}
+
+export const appleSearch = (q: string) => appleDirect(appleSearchUrl(q), parseSearch, `/api/apple/search?q=${encodeURIComponent(q)}`);
+export const appleTop = () => appleDirect(appleTopUrl(), parseTop, '/api/apple/top?country=cz');
+export const appleLookup = (id: string) => appleDirect(appleLookupUrl(id), parseLookup, `/api/apple/lookup?id=${id}`);
 
 // ---------------------------------------------------------------------------
 // Stav poslechu, fronta, nastavení
