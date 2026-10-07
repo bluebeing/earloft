@@ -10,6 +10,7 @@
     "deploy": "npm run build && wrangler deploy",
     "db:local": "wrangler d1 execute podcasty --local --file=worker/schema.sql",
     "db:remote": "wrangler d1 execute podcasty --remote --file=worker/schema.sql",
+    "db:migrate": "wrangler d1 execute podcasty --remote --file=worker/migrations/0002_skipped.sql",
     "typecheck": "tsc -b"
   },
   "dependencies": {

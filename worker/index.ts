@@ -133,7 +133,7 @@ async function sync(env: Env, since: number): Promise<Response> {
   const now = Date.now();
   const [subs, states, kv] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM subscriptions WHERE server_ts > ?').bind(since),
-    env.DB.prepare('SELECT episode_id, podcast_id, position_s, duration_s, played, updated_at FROM episode_state WHERE server_ts > ?').bind(since),
+    env.DB.prepare('SELECT episode_id, podcast_id, position_s, duration_s, played, skipped, updated_at FROM episode_state WHERE server_ts > ?').bind(since),
     env.DB.prepare('SELECT key, value, updated_at FROM kv WHERE server_ts > ?').bind(since),
   ]);
   return json({
@@ -157,6 +157,7 @@ async function sync(env: Env, since: number): Promise<Response> {
       position: r.position_s,
       duration: r.duration_s,
       played: !!r.played,
+      skipped: !!r.skipped,
       updatedAt: r.updated_at,
     })),
     kv: (kv.results as { key: string; value: string; updated_at: number }[]).map((r) => ({
@@ -216,6 +217,7 @@ interface StateInput {
   position: number;
   duration?: number | null;
   played: boolean;
+  skipped?: boolean;
   updatedAt: number;
 }
 
@@ -223,17 +225,17 @@ async function postState(env: Env, items: StateInput[]): Promise<Response> {
   if (!Array.isArray(items)) return err(400, 'Očekávám pole');
   const now = Date.now();
   const stmt = env.DB.prepare(
-    `INSERT INTO episode_state (episode_id, podcast_id, position_s, duration_s, played, updated_at, server_ts)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    `INSERT INTO episode_state (episode_id, podcast_id, position_s, duration_s, played, skipped, updated_at, server_ts)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?8, ?6, ?7)
      ON CONFLICT(episode_id) DO UPDATE SET
        position_s = excluded.position_s, duration_s = COALESCE(excluded.duration_s, episode_state.duration_s),
-       played = excluded.played, updated_at = excluded.updated_at, server_ts = excluded.server_ts
+       played = excluded.played, skipped = excluded.skipped, updated_at = excluded.updated_at, server_ts = excluded.server_ts
      WHERE excluded.updated_at > episode_state.updated_at`,
   );
   const valid = items.filter((i) => i && typeof i.episodeId === 'string' && typeof i.updatedAt === 'number').slice(0, 500);
   if (valid.length) {
     await env.DB.batch(
-      valid.map((i) => stmt.bind(i.episodeId, i.podcastId ?? '', Number(i.position) || 0, i.duration ?? null, i.played ? 1 : 0, i.updatedAt, now)),
+      valid.map((i) => stmt.bind(i.episodeId, i.podcastId ?? '', Number(i.position) || 0, i.duration ?? null, i.played ? 1 : 0, i.updatedAt, now, i.skipped ? 1 : 0)),
     );
   }
   return json({ ok: true, count: valid.length });

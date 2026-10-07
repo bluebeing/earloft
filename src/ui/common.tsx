@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { getPodcast, markPlayed, playLast, playNext, removeFromQueue } from '../library';
+import { getPodcast, markPlayed, markSkipped, playLast, playNext, removeFromQueue } from '../library';
 import { playEpisode, togglePlay } from '../player';
 import { state, useStore, useTick } from '../store';
 import type { Episode } from '../types';
@@ -248,6 +248,8 @@ export function episodeActions(ep: Episode) {
       ? { label: 'Označit jako nepřehrané', onClick: () => markPlayed(ep.id, false) }
       : { label: 'Označit jako přehrané', onClick: () => markPlayed(ep.id, true) },
   );
+  if (st?.skipped) actions.push({ label: 'Vrátit mezi nepřehrané', onClick: () => markSkipped(ep.id, false) });
+  else if (!st?.played) actions.push({ label: 'Nechci přehrát', onClick: () => markSkipped(ep.id, true) });
   actions.push({ label: 'Detail epizody', onClick: () => go(`/episode/${ep.id}`) });
   const pod = getPodcast(ep.podcastId);
   if (pod) actions.push({ label: `Přejít na ${pod.title}`, onClick: () => go(`/podcast/${pod.id}`) });
@@ -266,7 +268,8 @@ export function PlayPill({ ep }: { ep: Episode }) {
   const dur = (isCurrent && s.duration) || st?.duration || ep.duration || 0;
   const pos = isCurrent ? s.position : st && !st.played ? st.position : 0;
   const started = pos > 5 && dur > 0;
-  const label = st?.played && !isCurrent ? 'Přehráno' : started ? `zbývá ${formatDuration(dur - pos) || '<1 min'}` : formatDuration(dur);
+  const skipped = !!st?.skipped && !playing;
+  const label = st?.played && !isCurrent ? 'Přehráno' : skipped ? 'Přeskočeno' : started ? `zbývá ${formatDuration(dur - pos) || '<1 min'}` : formatDuration(dur);
 
   return (
     <button
@@ -279,7 +282,7 @@ export function PlayPill({ ep }: { ep: Episode }) {
       aria-label={playing ? 'Pozastavit' : 'Přehrát'}
     >
       {playing ? <PauseIcon size={12} /> : st?.played && !isCurrent ? <CheckIcon size={12} /> : <PlayIcon size={12} />}
-      {started && !st?.played && (
+      {started && !st?.played && !skipped && (
         <span class="pill-progress">
           <span style={{ width: `${Math.min(100, (pos / dur) * 100)}%` }} />
         </span>
@@ -293,7 +296,7 @@ export function EpisodeRow({ ep, showPodcast }: { ep: Episode; showPodcast?: boo
   const pod = getPodcast(ep.podcastId);
   const st = useStore().states.get(ep.id);
   return (
-    <div class={`episode-row${st?.played ? ' played' : ''}`} onClick={() => go(`/episode/${ep.id}`)}>
+    <div class={`episode-row${st?.played || st?.skipped ? ' played' : ''}`} onClick={() => go(`/episode/${ep.id}`)}>
       {showPodcast && <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={56} />}
       <div class="episode-body">
         <div class="episode-meta">

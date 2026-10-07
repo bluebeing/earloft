@@ -43,6 +43,8 @@ export interface EpisodeState {
   position: number;
   duration: number | null;
   played: boolean;
+  /** „Nechci přehrát“ */
+  skipped?: boolean;
   updatedAt: number;
   dirty?: boolean;
 }

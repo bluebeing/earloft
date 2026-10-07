@@ -1,4 +1,4 @@
-import { getPodcast, getState, markPlayed, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
+import { getPodcast, getState, markPlayed, markSkipped, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
 import { emit, set, state, tick } from './store';
 
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
@@ -40,6 +40,7 @@ export async function playEpisode(id: string) {
     const st = getState(id);
     if (st && !st.dirty && !st.played && Math.abs(st.position - audio.currentTime) > 3) audio.currentTime = st.position;
   }
+  if (getState(id)?.skipped) markSkipped(id, false);
   // Pokud hraje epizoda z fronty, z fronty ji vyřadíme
   if (state.queue.includes(id)) void setQueue(state.queue.filter((x) => x !== id));
   rememberNowPlaying(id);

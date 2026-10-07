@@ -237,7 +237,7 @@ export function getState(episodeId: string): EpisodeState | undefined {
 let stateWriteTimer: number | undefined;
 const pendingStateWrites = new Map<string, EpisodeState>();
 
-export function updateEpisodeState(episodeId: string, patch: Partial<Pick<EpisodeState, 'position' | 'duration' | 'played'>>, persistNow = false) {
+export function updateEpisodeState(episodeId: string, patch: Partial<Pick<EpisodeState, 'position' | 'duration' | 'played' | 'skipped'>>, persistNow = false) {
   const ep = state.episodes.get(episodeId);
   const prev = state.states.get(episodeId);
   const next: EpisodeState = {
@@ -246,6 +246,7 @@ export function updateEpisodeState(episodeId: string, patch: Partial<Pick<Episod
     position: prev?.position ?? 0,
     duration: prev?.duration ?? ep?.duration ?? null,
     played: prev?.played ?? false,
+    skipped: prev?.skipped ?? false,
     ...patch,
     updatedAt: Date.now(),
     dirty: true,
@@ -265,8 +266,20 @@ export function updateEpisodeState(episodeId: string, patch: Partial<Pick<Episod
 }
 
 export function markPlayed(episodeId: string, played: boolean) {
-  updateEpisodeState(episodeId, { played, position: 0 }, true);
+  updateEpisodeState(episodeId, { played, skipped: false, position: 0 }, true);
 }
+
+/** „Nechci přehrát“ – epizoda zmizí z nových a nepřehraných i z fronty. */
+export function markSkipped(episodeId: string, skipped: boolean) {
+  updateEpisodeState(episodeId, { skipped, played: false }, true);
+  if (skipped && state.queue.includes(episodeId)) void removeFromQueue(episodeId);
+}
+
+/** Přehráno nebo přeskočeno – už nepatří mezi nepřehrané. */
+export const isDone = (episodeId: string) => {
+  const st = state.states.get(episodeId);
+  return !!(st?.played || st?.skipped);
+};
 
 export async function setQueue(ids: string[]) {
   state.queue = [...new Set(ids)];

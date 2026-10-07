@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS episode_state (
   position_s REAL NOT NULL DEFAULT 0,
   duration_s REAL,
   played INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
   server_ts INTEGER NOT NULL
 );

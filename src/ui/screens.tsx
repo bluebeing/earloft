@@ -8,6 +8,7 @@ import {
   getEpisodeNotes,
   getPodcast,
   inCategory,
+  isDone,
   isSubscribed,
   markPlayed,
   previewFeed,
@@ -36,7 +37,7 @@ export function ListenNow() {
 
   const inProgress =
       [...s.states.values()]
-        .filter((st) => !st.played && st.position > 5 && s.episodes.has(st.episodeId) && !s.queue.includes(st.episodeId))
+        .filter((st) => !st.played && !st.skipped && st.position > 5 && s.episodes.has(st.episodeId) && !s.queue.includes(st.episodeId))
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 12)
         .map((st) => s.episodes.get(st.episodeId)!);
@@ -47,7 +48,7 @@ export function ListenNow() {
     const out: Episode[] = [];
     for (const p of activePodcasts()) if (inCategory(p.id, cat)) out.push(...(s.byPodcast.get(p.id) ?? []).slice(0, 5));
     return out
-      .filter((e) => !s.states.get(e.id)?.played)
+      .filter((e) => !isDone(e.id))
       .sort((a, b) => b.pubDate - a.pubDate)
       .slice(0, 40);
   })();
@@ -150,7 +151,7 @@ export function Library() {
       ) : (
         <div class="grid">
           {pods.map((p) => {
-            const unplayed = (s.byPodcast.get(p.id) ?? []).slice(0, 50).filter((e) => !s.states.get(e.id)?.played).length;
+            const unplayed = (s.byPodcast.get(p.id) ?? []).slice(0, 50).filter((e) => !isDone(e.id)).length;
             return (
               <a class="grid-item" href={`#/podcast/${p.id}`}>
                 <div class="grid-art">
@@ -187,9 +188,9 @@ export function PodcastPage({ id }: { id: string }) {
   if (!pod) return <NotFound />;
   const subscribed = isSubscribed(id);
   let eps = s.byPodcast.get(id) ?? [];
-  if (filter === 'unplayed') eps = eps.filter((e) => !s.states.get(e.id)?.played);
+  if (filter === 'unplayed') eps = eps.filter((e) => !isDone(e.id));
 
-  const latestUnplayed = (s.byPodcast.get(id) ?? []).find((e) => !s.states.get(e.id)?.played);
+  const latestUnplayed = (s.byPodcast.get(id) ?? []).find((e) => !isDone(e.id));
 
   const doSubscribe = async () => {
     setBusy(true);
