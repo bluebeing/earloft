@@ -1,12 +1,57 @@
 import { useState } from 'preact/hooks';
-import { getPodcast } from '../library';
-import { currentRate, seekChapter, seekTo, setRate, setSleepTimer, skipBack, skipForward, togglePlay } from '../player';
-import { chapterIndexAt, hasTranscript, useChapters } from '../media';
-import { BookmarkButton, showChapters } from './extras';
-import { set, useStore, useTick } from '../store';
+import { episodeArtwork, getPodcast } from '../library';
+import { chapterIndexAt, hasTranscript, useChapters, type Chapter } from '../media';
+import { currentRate, cycleRate, seekChapter, seekTo, setSleepTimer, skipBack, skipForward, togglePlay } from '../player';
+import { set, state, useStore, useTick } from '../store';
 import { formatClock } from '../util';
 import { Artwork, go, showActions, useDismiss } from './common';
+import { BookmarkButton, showChapters } from './extras';
 import { ChevronDownIcon, ListIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon, TextIcon } from './icons';
+
+const openNowPlaying = () => set({ nowPlayingOpen: true });
+
+const SLEEP_MINUTES = [5, 15, 30, 45, 60];
+
+const sleepTimerOn = () => !!(state.sleepAt || state.sleepAtEnd);
+
+function showSleepMenu() {
+  showActions('Časovač vypnutí', [
+    ...SLEEP_MINUTES.map((m) => ({ label: `${m} minut`, onClick: () => setSleepTimer(m) })),
+    { label: 'Na konci epizody', onClick: () => setSleepTimer('end') },
+    ...(sleepTimerOn() ? [{ label: 'Vypnout časovač', destructive: true, onClick: () => setSleepTimer(null) }] : []),
+  ]);
+}
+
+function sleepTimerLabel(): string {
+  if (state.sleepAtEnd) return 'Konec ep.';
+  if (state.sleepAt) return `${Math.max(1, Math.ceil((state.sleepAt - Date.now()) / 60000))} min`;
+  return '';
+}
+
+const currentChapter = (chapters: Chapter[], position: number) => chapters[chapterIndexAt(chapters, position)] ?? null;
+
+/** Posuvník pozice: během tažení ukazuje cílový čas, skočí se až po puštění. */
+function useScrubber(duration: number, position: number) {
+  const [scrub, setScrub] = useState<number | null>(null);
+  const pos = scrub ?? position;
+  const inputProps = {
+    type: 'range' as const,
+    min: 0,
+    max: Math.max(1, Math.floor(duration)),
+    step: 1,
+    value: Math.floor(pos),
+    onInput: (e: Event) => setScrub(Number((e.target as HTMLInputElement).value)),
+    onChange: (e: Event) => {
+      seekTo(Number((e.target as HTMLInputElement).value));
+      setScrub(null);
+    },
+    class: scrub !== null ? 'scrubbing' : '',
+    style: { '--pct': `${duration ? (pos / duration) * 100 : 0}%` },
+  };
+  return { pos, inputProps };
+}
+
+const remainingLabel = (duration: number, pos: number) => (duration ? `-${formatClock(duration - pos)}` : '--:--');
 
 export function MiniPlayer() {
   const s = useStore();
@@ -16,9 +61,9 @@ export function MiniPlayer() {
   const pod = getPodcast(ep.podcastId);
   const pct = s.duration ? (s.position / s.duration) * 100 : 0;
   return (
-    <div class="mini-player" onClick={() => set({ nowPlayingOpen: true })}>
+    <div class="mini-player" onClick={openNowPlaying}>
       <div class="mini-progress" style={{ width: `${pct}%` }} />
-      <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={44} />
+      <Artwork src={episodeArtwork(ep)} size={44} />
       <div class="mini-text">
         <div class="mini-title">{ep.title}</div>
         <div class="mini-sub">{pod?.title}</div>
@@ -47,37 +92,23 @@ export function MiniPlayer() {
   );
 }
 
-const RATES = [0.8, 1, 1.1, 1.2, 1.3, 1.5, 1.75, 2];
-
 export function NowPlaying() {
   const s = useStore();
   useTick(s.nowPlayingOpen);
-  const [scrub, setScrub] = useState<number | null>(null);
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
   const visible = s.nowPlayingOpen && !!ep;
-  const { ref, closing, close } = useDismiss(() => set({ nowPlayingOpen: false }), visible, true);
+  const { ref, closing, close } = useDismiss(() => set({ nowPlayingOpen: false }), visible);
   const chapters = useChapters(visible ? ep : null);
+  const dur = s.duration || ep?.duration || 0;
+  const { pos, inputProps } = useScrubber(dur, s.position);
   if (!visible || !ep) return null;
-  const chapterIdx = chapterIndexAt(chapters, s.position);
-  const chapter = chapterIdx >= 0 ? chapters[chapterIdx] : null;
-  const rate = currentRate();
+  const chapter = currentChapter(chapters, s.position);
   const pod = getPodcast(ep.podcastId);
-  const dur = s.duration || ep.duration || 0;
-  const pos = scrub ?? s.position;
-
-  const nextRate = () => {
-    const i = RATES.indexOf(currentRate());
-    setRate(RATES[(i + 1) % RATES.length] ?? 1);
+  const sleepLabel = sleepTimerLabel();
+  const closeAndGo = (path: string) => {
+    close();
+    go(path);
   };
-
-  const sleepMenu = () =>
-    showActions('Časovač vypnutí', [
-      ...[5, 15, 30, 45, 60].map((m) => ({ label: `${m} minut`, onClick: () => setSleepTimer(m) })),
-      { label: 'Na konci epizody', onClick: () => setSleepTimer('end') },
-      ...(s.sleepAt || s.sleepAtEnd ? [{ label: 'Vypnout časovač', destructive: true, onClick: () => setSleepTimer(null) }] : []),
-    ]);
-
-  const sleepLabel = s.sleepAtEnd ? 'Konec ep.' : s.sleepAt ? `${Math.max(1, Math.ceil((s.sleepAt - Date.now()) / 60000))} min` : '';
 
   return (
     <div class={`now-playing${closing ? ' closing' : ''}`} ref={ref}>
@@ -86,17 +117,11 @@ export function NowPlaying() {
           <ChevronDownIcon size={28} />
         </button>
         <div class="np-art">
-          <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={0} class="fluid" />
+          <Artwork src={episodeArtwork(ep)} size={0} class="fluid" />
         </div>
         <div class="np-info">
           <div class="np-title">{ep.title}</div>
-          <button
-            class="np-podcast"
-            onClick={() => {
-              close();
-              if (pod) go(`/podcast/${pod.id}`);
-            }}
-          >
+          <button class="np-podcast" onClick={() => (pod ? closeAndGo(`/podcast/${pod.id}`) : close())}>
             {pod?.title}
           </button>
           {chapter && (
@@ -107,23 +132,10 @@ export function NowPlaying() {
         </div>
 
         <div class="np-scrubber">
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, Math.floor(dur))}
-            step={1}
-            value={Math.floor(pos)}
-            onInput={(e) => setScrub(Number((e.target as HTMLInputElement).value))}
-            onChange={(e) => {
-              seekTo(Number((e.target as HTMLInputElement).value));
-              setScrub(null);
-            }}
-            class={scrub !== null ? 'scrubbing' : ''}
-            style={{ '--pct': `${dur ? (pos / dur) * 100 : 0}%` }}
-          />
+          <input {...inputProps} />
           <div class="np-times">
             <span>{formatClock(pos)}</span>
-            <span>{dur ? `-${formatClock(dur - pos)}` : '--:--'}</span>
+            <span>{remainingLabel(dur, pos)}</span>
           </div>
         </div>
 
@@ -140,8 +152,8 @@ export function NowPlaying() {
         </div>
 
         <div class="np-extras">
-          <button class="pill-btn" onClick={nextRate} title="Rychlost">
-            {rate}×
+          <button class="pill-btn" onClick={cycleRate} title="Rychlost">
+            {currentRate()}×
           </button>
           {chapters.length > 0 && (
             <button class="pill-btn" onClick={() => showChapters(ep, chapters, s.position)} title="Kapitoly" aria-label="Kapitoly">
@@ -149,29 +161,15 @@ export function NowPlaying() {
             </button>
           )}
           {hasTranscript(ep) && (
-            <button
-              class="pill-btn"
-              title="Přepis"
-              aria-label="Přepis"
-              onClick={() => {
-                close();
-                go(`/transcript/${ep.id}`);
-              }}
-            >
+            <button class="pill-btn" title="Přepis" aria-label="Přepis" onClick={() => closeAndGo(`/transcript/${ep.id}`)}>
               <TextIcon size={15} />
             </button>
           )}
           <BookmarkButton compact />
-          <button
-            class="pill-btn"
-            onClick={() => {
-              close();
-              go(`/episode/${ep.id}`);
-            }}
-          >
+          <button class="pill-btn" onClick={() => closeAndGo(`/episode/${ep.id}`)}>
             Poznámky
           </button>
-          <button class={`pill-btn${sleepLabel ? ' on' : ''}`} onClick={sleepMenu} aria-label="Časovač vypnutí">
+          <button class={`pill-btn${sleepLabel ? ' on' : ''}`} onClick={showSleepMenu} aria-label="Časovač vypnutí">
             <MoonIcon size={14} /> {sleepLabel}
           </button>
         </div>
@@ -184,32 +182,19 @@ export function NowPlaying() {
 export function DesktopPlayer() {
   const s = useStore();
   useTick();
-  const [scrub, setScrub] = useState<number | null>(null);
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
   const chapters = useChapters(ep);
+  const dur = s.duration || ep?.duration || 0;
+  const { pos, inputProps } = useScrubber(dur, s.position);
   if (!ep) return null;
   const pod = getPodcast(ep.podcastId);
-  const dur = s.duration || ep.duration || 0;
-  const pos = scrub ?? s.position;
-  const chapterIdx = chapterIndexAt(chapters, s.position);
-  const chapter = chapterIdx >= 0 ? chapters[chapterIdx] : null;
-  const nextRate = () => {
-    const i = RATES.indexOf(currentRate());
-    setRate(RATES[(i + 1) % RATES.length] ?? 1);
-  };
-  const sleepMenu = () =>
-    showActions('Časovač vypnutí', [
-      ...[5, 15, 30, 45, 60].map((m) => ({ label: `${m} minut`, onClick: () => setSleepTimer(m) })),
-      { label: 'Na konci epizody', onClick: () => setSleepTimer('end') },
-      ...(s.sleepAt || s.sleepAtEnd ? [{ label: 'Vypnout časovač', destructive: true, onClick: () => setSleepTimer(null) }] : []),
-    ]);
-  const sleepOn = !!(s.sleepAt || s.sleepAtEnd);
+  const chapter = currentChapter(chapters, s.position);
 
   return (
     <div class="desk-player">
       <div class="dp-info">
-        <button class="dp-art" onClick={() => set({ nowPlayingOpen: true })} aria-label="Otevřít přehrávač">
-          <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={56} />
+        <button class="dp-art" onClick={openNowPlaying} aria-label="Otevřít přehrávač">
+          <Artwork src={episodeArtwork(ep)} size={56} />
         </button>
         <div class="dp-text">
           <a class="dp-title" href={`#/episode/${ep.id}`} title={ep.title}>
@@ -242,22 +227,8 @@ export function DesktopPlayer() {
         </div>
         <div class="dp-scrubber np-scrubber">
           <span>{formatClock(pos)}</span>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, Math.floor(dur))}
-            step={1}
-            value={Math.floor(pos)}
-            onInput={(e) => setScrub(Number((e.target as HTMLInputElement).value))}
-            onChange={(e) => {
-              seekTo(Number((e.target as HTMLInputElement).value));
-              setScrub(null);
-            }}
-            class={scrub !== null ? 'scrubbing' : ''}
-            style={{ '--pct': `${dur ? (pos / dur) * 100 : 0}%` }}
-            aria-label="Pozice v epizodě"
-          />
-          <span>{dur ? `-${formatClock(dur - pos)}` : '--:--'}</span>
+          <input {...inputProps} aria-label="Pozice v epizodě" />
+          <span>{remainingLabel(dur, pos)}</span>
         </div>
       </div>
 
@@ -278,13 +249,13 @@ export function DesktopPlayer() {
           </a>
         )}
         <BookmarkButton compact />
-        <button class="pill-btn" onClick={nextRate} title="Rychlost přehrávání">
+        <button class="pill-btn" onClick={cycleRate} title="Rychlost přehrávání">
           {currentRate()}×
         </button>
-        <button class={`pill-btn${sleepOn ? ' on' : ''}`} onClick={sleepMenu} title="Časovač vypnutí">
+        <button class={`pill-btn${sleepTimerOn() ? ' on' : ''}`} onClick={showSleepMenu} title="Časovač vypnutí">
           <MoonIcon size={14} />
         </button>
-        <button class="icon-btn" onClick={() => set({ nowPlayingOpen: true })} title="Celá obrazovka" aria-label="Otevřít přehrávač">
+        <button class="icon-btn" onClick={openNowPlaying} title="Celá obrazovka" aria-label="Otevřít přehrávač">
           <ChevronDownIcon size={22} style={{ transform: 'rotate(180deg)' }} />
         </button>
       </div>

@@ -1,24 +1,13 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { addBookmark, allBookmarks, bookmarksMarkdown, deleteBookmark, updateBookmarkNote } from '../bookmarks';
-import { getPodcast, podSettings, updatePodSettings } from '../library';
-import { chapterIndexAt, hasTranscript, loadTranscript, useChapters, type Chapter, type Cue } from '../media';
-import { isLoaded, playEpisode, seekTo } from '../player';
+import { addBookmark, allBookmarks, bookmarksMarkdown, deleteBookmark, updateBookmarkNote, type StoredBookmark } from '../bookmarks';
+import { episodeArtwork, getPodcast, podSettings, updatePodSettings } from '../library';
+import { chapterIndexAt, loadTranscript, useChapters, type Chapter, type Cue } from '../media';
+import { playAt } from '../player';
 import { state, toast, useStore, useTick } from '../store';
 import type { Episode } from '../types';
-import { formatClock } from '../util';
-import { Artwork, Empty, Header, NotFoundInline, Spinner, go, scroller, showActions } from './common';
+import { downloadFile, errorMessage, formatClock } from '../util';
+import { Artwork, Empty, Header, NotFound, Spinner, scroller, showActions } from './common';
 import { BookmarkIcon, TrashIcon } from './icons';
-
-/** Přehraje epizodu od daného času (načte ji, pokud zrovna nehraje). */
-export async function playAt(episodeId: string, time: number) {
-  if (state.currentId === episodeId && isLoaded(episodeId)) {
-    seekTo(time);
-    if (!state.playing) void playEpisode(episodeId);
-  } else {
-    await playEpisode(episodeId);
-    seekTo(time);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Kapitoly
@@ -60,6 +49,8 @@ export function ChapterList({ ep }: { ep: Episode }) {
 // ---------------------------------------------------------------------------
 // Přepis
 
+const USER_SCROLL_PAUSE_MS = 4000;
+
 export function TranscriptPage({ id }: { id: string }) {
   const s = useStore();
   const ep = s.episodes.get(id);
@@ -72,10 +63,10 @@ export function TranscriptPage({ id }: { id: string }) {
 
   useEffect(() => {
     if (!ep) return;
-    loadTranscript(ep).then(setCues, (e) => setError(e instanceof Error ? e.message : String(e)));
+    loadTranscript(ep).then(setCues, (e) => setError(errorMessage(e)));
   }, [id]);
 
-  // Uživatel scrolluje sám → chvíli neposouvat automaticky
+  // Uživatel scrolluje sám → chvíli (USER_SCROLL_PAUSE_MS) neposouvat automaticky
   useEffect(() => {
     const el = scroller();
     const on = () => (lastUserScroll.current = Date.now());
@@ -92,18 +83,18 @@ export function TranscriptPage({ id }: { id: string }) {
   useEffect(() => {
     if (active < 0 || active === lastActive.current) return;
     lastActive.current = active;
-    if (Date.now() - lastUserScroll.current < 4000) return;
+    if (Date.now() - lastUserScroll.current < USER_SCROLL_PAUSE_MS) return;
     document.querySelector(`[data-cue="${active}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [active]);
 
-  if (!ep) return <NotFoundInline />;
+  if (!ep) return <NotFound />;
   const pod = getPodcast(ep.podcastId);
 
   return (
     <div class="screen">
       <Header title="Přepis" back />
       <div class="transcript-head">
-        <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={56} />
+        <Artwork src={episodeArtwork(ep)} size={56} />
         <div>
           <div class="episode-meta">{pod?.title}</div>
           <div class="episode-title">{ep.title}</div>
@@ -134,9 +125,6 @@ export function TranscriptPage({ id }: { id: string }) {
   );
 }
 
-export const openTranscript = (ep: Episode) => go(`/transcript/${ep.id}`);
-export { hasTranscript };
-
 // ---------------------------------------------------------------------------
 // Nastavení podcastu
 
@@ -147,7 +135,7 @@ const OUTRO_OPTIONS = [0, 10, 15, 20, 30, 45, 60, 90, 120, 180];
 export function PodcastSettingsPage({ id }: { id: string }) {
   const s = useStore();
   const pod = getPodcast(id);
-  if (!pod) return <NotFoundInline />;
+  if (!pod) return <NotFound />;
   const ps = podSettings(id);
   const num = (e: Event) => Number((e.target as HTMLSelectElement).value);
 
@@ -221,7 +209,9 @@ export function BookmarkButton({ compact }: { compact?: boolean }) {
   );
 }
 
-function BookmarkRow({ b, showEpisode }: { b: ReturnType<typeof allBookmarks>[number]; showEpisode?: boolean }) {
+const NOTE_SAVE_DELAY_MS = 700;
+
+function BookmarkRow({ b, showEpisode }: { b: StoredBookmark; showEpisode?: boolean }) {
   const [note, setNote] = useState(b.note);
   const saveTimer = useRef<number | undefined>(undefined);
   useEffect(() => setNote(b.note), [b.note]);
@@ -229,7 +219,7 @@ function BookmarkRow({ b, showEpisode }: { b: ReturnType<typeof allBookmarks>[nu
   const pod = getPodcast(b.podcastId);
   return (
     <div class="bookmark-row">
-      {showEpisode && <Artwork src={ep?.artworkUrl || pod?.artworkUrl} size={44} />}
+      {showEpisode && <Artwork src={episodeArtwork(ep) ?? pod?.artworkUrl} size={44} />}
       <div class="bookmark-body">
         {showEpisode && (
           <a class="bookmark-ep" href={ep ? `#/episode/${ep.id}` : undefined}>
@@ -250,7 +240,7 @@ function BookmarkRow({ b, showEpisode }: { b: ReturnType<typeof allBookmarks>[nu
               setNote(v);
               // Uložit chvíli po dopsání (nespoléhat jen na opuštění pole)
               clearTimeout(saveTimer.current);
-              saveTimer.current = window.setTimeout(() => void updateBookmarkNote(b, v), 700);
+              saveTimer.current = window.setTimeout(() => void updateBookmarkNote(b, v), NOTE_SAVE_DELAY_MS);
             }}
             onBlur={() => {
               clearTimeout(saveTimer.current);
@@ -291,14 +281,7 @@ export function BookmarksView() {
   useStore();
   const list = allBookmarks();
 
-  const download = () => {
-    const blob = new Blob([bookmarksMarkdown()], { type: 'text/markdown' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'earloft-zalozky.md';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  };
+  const download = () => downloadFile('earloft-zalozky.md', bookmarksMarkdown(), 'text/markdown');
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(bookmarksMarkdown());

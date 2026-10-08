@@ -1,21 +1,17 @@
 import { useState } from 'preact/hooks';
 import { api, getToken, setToken } from '../api';
-import { activePodcasts, exportOpml, importOpml, resetLocal, sync, updateSettings } from '../library';
+import { activePodcasts, updateSettings } from '../library';
+import { exportOpml, importOpml } from '../opml';
 import { set, toast, useStore } from '../store';
+import { resetLocal, sync } from '../sync';
+import { downloadFile, errorMessage } from '../util';
 import { Header, Spinner } from './common';
 
 export function Settings() {
   const s = useStore();
   const [importing, setImporting] = useState(false);
 
-  const download = () => {
-    const blob = new Blob([exportOpml()], { type: 'text/x-opml' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'podcasty.opml';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  };
+  const download = () => downloadFile('podcasty.opml', exportOpml(), 'text/x-opml');
 
   const onFile = async (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -66,7 +62,7 @@ export function Settings() {
           <span>Poslední synchronizace</span>
           <span class="muted">{s.syncing ? 'probíhá…' : s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleTimeString('cs-CZ') : '—'}</span>
         </div>
-        <button class="form-row link" onClick={() => void sync().then(() => toast('Synchronizováno'), (e) => toast(String(e.message ?? e)))}>
+        <button class="form-row link" onClick={() => void sync().then(() => toast('Synchronizováno'), (e) => toast(errorMessage(e)))}>
           Synchronizovat teď
         </button>
       </div>
@@ -110,7 +106,7 @@ export function Login() {
       void sync().catch(() => {});
     } catch (err) {
       setToken('');
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

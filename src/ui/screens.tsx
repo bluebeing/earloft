@@ -1,17 +1,21 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import DOMPurify from 'dompurify';
+import { addBookmark } from '../bookmarks';
 import {
   activePodcasts,
   appleLookup,
   appleSearch,
   appleTop,
+  categoryNamesFor,
+  episodeArtwork,
   getEpisodeNotes,
   getPodcast,
   inCategory,
   isDone,
   isSubscribed,
-  podSettings,
   markPlayed,
+  podSettings,
+  previewApple,
   previewFeed,
   refreshAll,
   refreshPodcast,
@@ -21,17 +25,15 @@ import {
   subscribeApple,
   unsubscribe,
 } from '../library';
-import { playEpisode, seekTo } from '../player';
+import { hasTranscript } from '../media';
+import { playAt, playEpisode } from '../player';
 import { toast, useStore } from '../store';
 import type { ApplePodcast, Episode } from '../types';
-import { appleIdFromUrl, formatDate, formatDuration, safeHttpUrl } from '../util';
-import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, goBack, showActions } from './common';
-import { CategoryChips, categoryNamesFor, pickCategories, useCategoryFilter } from './categories';
+import { appleIdFromUrl, errorMessage, formatDate, formatDuration, safeHttpUrl } from '../util';
+import { CategoryChips, pickCategories, useCategoryFilter } from './categories';
+import { Artwork, Empty, EpisodeRow, Header, NotFound, PlayPill, Spinner, episodeActions, go, goBack, showActions } from './common';
 import { ChapterList, EpisodeBookmarks } from './extras';
-import { hasTranscript } from '../media';
-import { BookmarkIcon, TextIcon } from './icons';
-import { addBookmark } from '../bookmarks';
-import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from './icons';
+import { BookmarkIcon, CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon, TextIcon } from './icons';
 
 // ---------------------------------------------------------------------------
 // Poslouchat
@@ -123,7 +125,7 @@ function ContinueCard({ ep }: { ep: Episode }) {
   const pod = getPodcast(ep.podcastId);
   return (
     <div class="card" onClick={() => go(`/episode/${ep.id}`)}>
-      <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={150} />
+      <Artwork src={episodeArtwork(ep)} size={150} />
       <div class="card-meta">{pod?.title}</div>
       <div class="card-title">{ep.title}</div>
       <PlayPill ep={ep} />
@@ -209,7 +211,7 @@ export function PodcastPage({ id }: { id: string }) {
       await subscribe(pod.feedUrl, pod);
       toast('Přidáno do knihovny');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Nepodařilo se přidat');
+      toast(errorMessage(e, 'Nepodařilo se přidat'));
     } finally {
       setBusy(false);
     }
@@ -219,7 +221,7 @@ export function PodcastPage({ id }: { id: string }) {
     showActions(pod.title, [
       { label: 'Nastavení podcastu…', onClick: () => go(`/podcast-settings/${pod.id}`) },
       { label: 'Kategorie…', onClick: () => pickCategories(pod.id) },
-      { label: 'Obnovit feed', onClick: () => void refreshPodcast(pod, true).then(() => toast('Obnoveno')) },
+      { label: 'Obnovit feed', onClick: () => void refreshPodcast(pod, { ignoreCache: true }).then(() => toast('Obnoveno')) },
       { label: pod.isPrivate ? 'Označit jako veřejný' : 'Označit jako soukromý', onClick: () => void setPodcastPrivate(pod.id, !pod.isPrivate) },
       {
         label: 'Označit vše jako přehrané',
@@ -330,6 +332,7 @@ function podSettingsSummary(id: string): string {
 
 const TIME_RE = /\b(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)\b/g;
 
+/** Poznámky z feedu (nedůvěryhodné HTML nebo prostý text) → bezpečné HTML s klikacími časy. */
 function prepareNotes(html: string): string {
   const looksHtml = /<[a-z][\s\S]*>/i.test(html);
   const clean = DOMPurify.sanitize(looksHtml ? html : html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>'), {
@@ -338,12 +341,20 @@ function prepareNotes(html: string): string {
   });
   const doc = new DOMParser().parseFromString(`<div>${clean}</div>`, 'text/html');
   const root = doc.body.firstElementChild!;
-  // Odkazy otevírat mimo appku
+  openLinksExternally(root);
+  linkifyTimestamps(doc, root);
+  return root.innerHTML;
+}
+
+function openLinksExternally(root: Element) {
   root.querySelectorAll('a').forEach((a) => {
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noopener noreferrer');
   });
-  // Časové značky 12:34 → klikací odkazy
+}
+
+/** Časové značky 12:34 → odkazy `a.ts[data-t]`, které přehrají epizodu od toho místa. */
+function linkifyTimestamps(doc: Document, root: Element) {
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
   while (walker.nextNode()) texts.push(walker.currentNode as Text);
@@ -368,14 +379,12 @@ function prepareNotes(html: string): string {
     frag.append(v.slice(last));
     t.replaceWith(frag);
   }
-  return root.innerHTML;
 }
 
 export function EpisodePage({ id }: { id: string }) {
   const s = useStore();
   const ep = s.episodes.get(id);
   const [notes, setNotes] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -390,12 +399,7 @@ export function EpisodePage({ id }: { id: string }) {
     const a = (e.target as HTMLElement).closest('a.ts') as HTMLAnchorElement | null;
     if (!a) return;
     e.preventDefault();
-    const t = Number(a.dataset.t);
-    if (s.currentId !== ep.id) void playEpisode(ep.id).then(() => seekTo(t));
-    else {
-      seekTo(t);
-      if (!s.playing) void playEpisode(ep.id);
-    }
+    void playAt(ep.id, Number(a.dataset.t));
   };
 
   return (
@@ -410,7 +414,7 @@ export function EpisodePage({ id }: { id: string }) {
         }
       />
       <div class="episode-hero">
-        <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={140} />
+        <Artwork src={episodeArtwork(ep)} size={140} />
         <div class="episode-meta">
           {formatDate(ep.pubDate)}
           {ep.duration ? ` · ${formatDuration(ep.duration)}` : ''}
@@ -438,7 +442,7 @@ export function EpisodePage({ id }: { id: string }) {
       <ChapterList ep={ep} />
       <EpisodeBookmarks ep={ep} />
       <h2 class="section-title notes-title">Poznámky</h2>
-      <div class="notes" ref={ref} onClick={onNotesClick}>
+      <div class="notes" onClick={onNotesClick}>
         {notes === null ? <Spinner /> : notes ? <div dangerouslySetInnerHTML={{ __html: notes }} /> : <p class="muted">Bez popisu.</p>}
       </div>
     </div>
@@ -473,7 +477,7 @@ export function Search() {
       if (appleId) {
         const info = await appleLookup(appleId);
         if (!info) throw new Error('Podcast na Apple Podcasts nenalezen');
-        await openApple(info);
+        go(`/podcast/${(await previewApple(info)).id}`);
       } else if (/^(https?:\/\/|feed:\/\/)/i.test(text)) {
         const url = text.replace(/^feed:\/\//i, 'https://');
         const p = await previewFeed(url);
@@ -482,7 +486,7 @@ export function Search() {
         setResults(await appleSearch(text));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -528,13 +532,6 @@ export function Search() {
   );
 }
 
-async function openApple(a: ApplePodcast) {
-  const info = a.feedUrl ? a : await appleLookup(a.appleId);
-  if (!info?.feedUrl) throw new Error('Tento podcast je jen v placeném Apple předplatném – veřejné RSS neexistuje.');
-  const p = await previewFeed(info.feedUrl, { source: 'apple', appleId: a.appleId, title: a.title, author: a.author, artworkUrl: a.artworkUrl });
-  go(`/podcast/${p.id}`);
-}
-
 function AppleRow({ a, rank }: { a: ApplePodcast; rank?: number }) {
   const [busy, setBusy] = useState<'open' | 'add' | null>(null);
   const subscribed = activePodcasts().some((p) => p.appleId === a.appleId || (a.feedUrl && p.feedUrl === a.feedUrl));
@@ -542,13 +539,13 @@ function AppleRow({ a, rank }: { a: ApplePodcast; rank?: number }) {
   const run = async (kind: 'open' | 'add') => {
     setBusy(kind);
     try {
-      if (kind === 'open') await openApple(a);
+      if (kind === 'open') go(`/podcast/${(await previewApple(a)).id}`);
       else {
         await subscribeApple(a);
         toast(`„${a.title}“ přidáno do knihovny`);
       }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Nepodařilo se');
+      toast(errorMessage(e, 'Nepodařilo se'));
     } finally {
       setBusy(null);
     }
@@ -583,15 +580,6 @@ function AppleRow({ a, rank }: { a: ApplePodcast; rank?: number }) {
           <PlusIcon size={20} />
         </button>
       )}
-    </div>
-  );
-}
-
-export function NotFound() {
-  return (
-    <div class="screen">
-      <Header title="" back />
-      <Empty title="Nenalezeno">Tahle položka už není k dispozici.</Empty>
     </div>
   );
 }

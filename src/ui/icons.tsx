@@ -80,4 +80,3 @@ export const BookmarkIcon = svg(<path d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5v16.1a.6.
 export const TrashIcon = svg(
   <path d="M4.5 6.5h15M9.5 6.5V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3v1.7M6.5 6.5l.8 12.6c.1 1 .9 1.9 2 1.9h5.4c1 0 1.9-.9 2-1.9l.8-12.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />,
 );
-export const GearIcon = TabSettings;

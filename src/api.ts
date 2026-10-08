@@ -1,21 +1,9 @@
+import { readLocal, writeLocal } from './storage';
+
 const TOKEN_KEY = 'podcasty.token';
 
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-export function setToken(token: string) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* privátní režim */
-  }
-}
+export const getToken = () => readLocal(TOKEN_KEY) ?? '';
+export const setToken = (token: string) => writeLocal(TOKEN_KEY, token);
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {

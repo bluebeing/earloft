@@ -11,11 +11,11 @@ export interface ParsedFeed {
   notes: Map<string, string>;
 }
 
-const kids = (el: Element, name: string) => Array.from(el.children).filter((c) => c.nodeName.toLowerCase() === name);
-const kid = (el: Element, name: string) => kids(el, name)[0] ?? null;
-const text = (el: Element, ...names: string[]) => {
+const childrenNamed = (el: Element, name: string) => Array.from(el.children).filter((c) => c.nodeName.toLowerCase() === name);
+const childNamed = (el: Element, name: string) => childrenNamed(el, name)[0] ?? null;
+const childText = (el: Element, ...names: string[]) => {
   for (const n of names) {
-    const v = kid(el, n)?.textContent?.trim();
+    const v = childNamed(el, n)?.textContent?.trim();
     if (v) return v;
   }
   return '';
@@ -30,63 +30,77 @@ function parseDuration(v: string): number | null {
   return parts.reduce((acc, p) => acc * 60 + p, 0);
 }
 
-const int = (v: string) => (/^\d+$/.test(v) ? Number(v) : null);
+const parseInteger = (v: string) => (/^\d+$/.test(v) ? Number(v) : null);
+
+const UNTITLED = 'Bez názvu';
+const SUMMARY_MAX_LENGTH = 300;
 
 export function parseFeed(xml: string, podcastId: string): ParsedFeed {
-  const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('Feed není platné RSS/XML');
-  const channel = doc.getElementsByTagName('channel')[0];
-  if (!channel) throw new Error('Feed neobsahuje <channel> – nejde o podcastové RSS');
-
-  const channelImage =
-    kid(channel, 'itunes:image')?.getAttribute('href') || kid(channel, 'image')?.getElementsByTagName('url')[0]?.textContent?.trim() || null;
-
+  const channel = parseChannel(xml);
   const episodes: Episode[] = [];
   const notes = new Map<string, string>();
   const seen = new Set<string>();
 
-  for (const item of kids(channel, 'item')) {
-    const enclosure = kid(item, 'enclosure');
-    const audioUrl = enclosure?.getAttribute('url')?.trim();
-    if (!audioUrl) continue;
-    const guid = text(item, 'guid') || audioUrl;
-    const id = episodeIdFor(podcastId, guid);
-    if (seen.has(id)) continue;
-    seen.add(id);
-
-    const html = text(item, 'content:encoded') || text(item, 'description') || text(item, 'itunes:summary');
-    const pub = Date.parse(text(item, 'pubdate'));
-    episodes.push({
-      id,
-      podcastId,
-      guid,
-      title: text(item, 'title', 'itunes:title') || 'Bez názvu',
-      pubDate: isNaN(pub) ? 0 : pub,
-      duration: parseDuration(text(item, 'itunes:duration')),
-      audioUrl,
-      audioType: enclosure?.getAttribute('type') ?? null,
-      artworkUrl: kid(item, 'itunes:image')?.getAttribute('href') ?? null,
-      summary: htmlToText(text(item, 'itunes:subtitle') || html).slice(0, 300),
-      season: int(text(item, 'itunes:season')),
-      episode: int(text(item, 'itunes:episode')),
-      link: text(item, 'link') || null,
-      chaptersUrl: kid(item, 'podcast:chapters')?.getAttribute('url') ?? null,
-      transcripts: kids(item, 'podcast:transcript')
-        .map((t) => ({ url: t.getAttribute('url') ?? '', type: (t.getAttribute('type') ?? '').toLowerCase() }))
-        .filter((t) => t.url),
-    });
-    if (html) notes.set(id, html);
+  for (const item of childrenNamed(channel, 'item')) {
+    const parsed = parseItem(item, podcastId);
+    // Bez audia to není epizoda; u duplicitního GUID platí první výskyt
+    if (!parsed || seen.has(parsed.episode.id)) continue;
+    seen.add(parsed.episode.id);
+    episodes.push(parsed.episode);
+    if (parsed.notes) notes.set(parsed.episode.id, parsed.notes);
   }
-
   episodes.sort((a, b) => b.pubDate - a.pubDate);
 
   return {
-    title: text(channel, 'title') || 'Bez názvu',
-    author: text(channel, 'itunes:author', 'author') || null,
-    description: htmlToText(text(channel, 'description', 'itunes:summary')),
-    link: text(channel, 'link') || null,
-    artworkUrl: channelImage,
+    title: childText(channel, 'title') || UNTITLED,
+    author: childText(channel, 'itunes:author', 'author') || null,
+    description: htmlToText(childText(channel, 'description', 'itunes:summary')),
+    link: childText(channel, 'link') || null,
+    artworkUrl: channelArtwork(channel),
     episodes,
     notes,
+  };
+}
+
+function parseChannel(xml: string): Element {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Feed není platné RSS/XML');
+  const channel = doc.getElementsByTagName('channel')[0];
+  if (!channel) throw new Error('Feed neobsahuje <channel> – nejde o podcastové RSS');
+  return channel;
+}
+
+const channelArtwork = (channel: Element) =>
+  childNamed(channel, 'itunes:image')?.getAttribute('href') || childNamed(channel, 'image')?.getElementsByTagName('url')[0]?.textContent?.trim() || null;
+
+/** Jedna položka feedu → epizoda a její poznámky (HTML). Položka bez audia vrátí null. */
+function parseItem(item: Element, podcastId: string): { episode: Episode; notes: string } | null {
+  const enclosure = childNamed(item, 'enclosure');
+  const audioUrl = enclosure?.getAttribute('url')?.trim();
+  if (!audioUrl) return null;
+  const guid = childText(item, 'guid') || audioUrl;
+  const notes = childText(item, 'content:encoded') || childText(item, 'description') || childText(item, 'itunes:summary');
+  const pubDate = Date.parse(childText(item, 'pubdate'));
+  return {
+    notes,
+    episode: {
+      id: episodeIdFor(podcastId, guid),
+      podcastId,
+      guid,
+      title: childText(item, 'title', 'itunes:title') || UNTITLED,
+      pubDate: isNaN(pubDate) ? 0 : pubDate,
+      duration: parseDuration(childText(item, 'itunes:duration')),
+      audioUrl,
+      audioType: enclosure?.getAttribute('type') ?? null,
+      artworkUrl: childNamed(item, 'itunes:image')?.getAttribute('href') ?? null,
+      summary: htmlToText(childText(item, 'itunes:subtitle') || notes).slice(0, SUMMARY_MAX_LENGTH),
+      season: parseInteger(childText(item, 'itunes:season')),
+      episode: parseInteger(childText(item, 'itunes:episode')),
+      link: childText(item, 'link') || null,
+      chaptersUrl: childNamed(item, 'podcast:chapters')?.getAttribute('url') ?? null,
+      transcripts: childrenNamed(item, 'podcast:transcript')
+        .map((t) => ({ url: t.getAttribute('url') ?? '', type: (t.getAttribute('type') ?? '').toLowerCase() }))
+        .filter((t) => t.url),
+    },
   };
 }

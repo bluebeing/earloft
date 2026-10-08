@@ -25,10 +25,10 @@ function parseChaptersJson(text: string): Chapter[] {
     .map((c: any) => ({ start: c.startTime, title: String(c.title ?? '').trim() || 'Kapitola', url: c.url ?? null }));
 }
 
-const TS = String.raw`(?:(\d{1,2}):)?(\d{1,2}):(\d{2})`;
-const LEADING = new RegExp(String.raw`^\s*[\(\[]?${TS}[\)\]]?\s*[-–—:|.)]?\s*(.{2,})$`);
-const TRAILING = new RegExp(String.raw`^\s*(.{2,}?)\s*[-–—:|(\[]?\s*${TS}[\)\]]?\s*$`);
-const toSec = (h?: string, m?: string, s?: string) => Number(h ?? 0) * 3600 + Number(m) * 60 + Number(s);
+const TIMESTAMP = String.raw`(?:(\d{1,2}):)?(\d{1,2}):(\d{2})`;
+const LEADING = new RegExp(String.raw`^\s*[\(\[]?${TIMESTAMP}[\)\]]?\s*[-–—:|.)]?\s*(.{2,})$`);
+const TRAILING = new RegExp(String.raw`^\s*(.{2,}?)\s*[-–—:|(\[]?\s*${TIMESTAMP}[\)\]]?\s*$`);
+const toSeconds = (h?: string, m?: string, s?: string) => Number(h ?? 0) * 3600 + Number(m) * 60 + Number(s);
 
 /** „12:34 Název“ nebo „Název – 12:34“ po řádcích poznámek → kapitoly */
 export function parseNoteChapters(html: string): Chapter[] {
@@ -40,11 +40,11 @@ export function parseNoteChapters(html: string): Chapter[] {
     if (!line || line.length > 200) continue;
     let m = line.match(LEADING);
     if (m) {
-      out.push({ start: toSec(m[1], m[2], m[3]), title: m[4].trim() });
+      out.push({ start: toSeconds(m[1], m[2], m[3]), title: m[4].trim() });
       continue;
     }
     m = line.match(TRAILING);
-    if (m) out.push({ start: toSec(m[2], m[3], m[4]), title: m[1].replace(/[-–—:|(\[]\s*$/, '').trim() });
+    if (m) out.push({ start: toSeconds(m[2], m[3], m[4]), title: m[1].replace(/[-–—:|(\[]\s*$/, '').trim() });
   }
   // Musí to vypadat jako opravdové kapitoly: aspoň 2, vzestupně
   const sorted = out.filter((c, i) => i === 0 || c.start > out[i - 1].start);

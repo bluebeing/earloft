@@ -100,7 +100,7 @@ async function proxyFeed(req: Request, url: URL): Promise<Response> {
   }
 
   // Obsah cizího serveru nikdy nevydávat za HTML z naší domény – jen text se zachovaným kódováním
-  const charset = upstream.headers.get('content-type')?.match(/charset=([w-]+)/i)?.[1] ?? 'utf-8';
+  const charset = upstream.headers.get('content-type')?.match(/charset=([\w-]+)/i)?.[1] ?? 'utf-8';
   const out = new Headers({
     'content-type': `text/plain; charset=${charset}`,
     'x-content-type-options': 'nosniff',
@@ -141,35 +141,53 @@ async function sync(env: Env, since: number): Promise<Response> {
   ]);
   return json({
     now,
-    subs: (subs.results as unknown as SubRow[]).map((r) => ({
-      id: r.id,
-      feedUrl: r.feed_url,
-      title: r.title,
-      author: r.author,
-      artworkUrl: r.artwork_url,
-      source: r.source,
-      appleId: r.apple_id,
-      isPrivate: !!r.is_private,
-      addedAt: r.added_at,
-      deleted: !!r.deleted,
-      updatedAt: r.updated_at,
-    })),
-    states: (states.results as Record<string, unknown>[]).map((r) => ({
-      episodeId: r.episode_id,
-      podcastId: r.podcast_id,
-      position: r.position_s,
-      duration: r.duration_s,
-      played: !!r.played,
-      skipped: !!r.skipped,
-      updatedAt: r.updated_at,
-    })),
-    kv: (kv.results as { key: string; value: string; updated_at: number }[]).map((r) => ({
-      key: r.key,
-      value: JSON.parse(r.value),
-      updatedAt: r.updated_at,
-    })),
+    subs: (subs.results as unknown as SubRow[]).map(subFromRow),
+    states: (states.results as unknown as StateRow[]).map(stateFromRow),
+    kv: (kv.results as unknown as KvRow[]).map(kvFromRow),
   });
 }
+
+interface StateRow {
+  episode_id: string;
+  podcast_id: string;
+  position_s: number;
+  duration_s: number | null;
+  played: number;
+  skipped: number;
+  updated_at: number;
+}
+
+interface KvRow {
+  key: string;
+  value: string;
+  updated_at: number;
+}
+
+const subFromRow = (r: SubRow) => ({
+  id: r.id,
+  feedUrl: r.feed_url,
+  title: r.title,
+  author: r.author,
+  artworkUrl: r.artwork_url,
+  source: r.source,
+  appleId: r.apple_id,
+  isPrivate: !!r.is_private,
+  addedAt: r.added_at,
+  deleted: !!r.deleted,
+  updatedAt: r.updated_at,
+});
+
+const stateFromRow = (r: StateRow) => ({
+  episodeId: r.episode_id,
+  podcastId: r.podcast_id,
+  position: r.position_s,
+  duration: r.duration_s,
+  played: !!r.played,
+  skipped: !!r.skipped,
+  updatedAt: r.updated_at,
+});
+
+const kvFromRow = (r: KvRow) => ({ key: r.key, value: JSON.parse(r.value), updatedAt: r.updated_at });
 
 interface SubInput {
   id: string;
@@ -224,21 +242,23 @@ interface StateInput {
   updatedAt: number;
 }
 
+const MAX_STATES_PER_REQUEST = 500;
+
 async function postState(env: Env, items: StateInput[]): Promise<Response> {
   if (!Array.isArray(items)) return err(400, 'Očekávám pole');
   const now = Date.now();
   const stmt = env.DB.prepare(
     `INSERT INTO episode_state (episode_id, podcast_id, position_s, duration_s, played, skipped, updated_at, server_ts)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?8, ?6, ?7)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
      ON CONFLICT(episode_id) DO UPDATE SET
        position_s = excluded.position_s, duration_s = COALESCE(excluded.duration_s, episode_state.duration_s),
        played = excluded.played, skipped = excluded.skipped, updated_at = excluded.updated_at, server_ts = excluded.server_ts
      WHERE excluded.updated_at > episode_state.updated_at`,
   );
-  const valid = items.filter((i) => i && typeof i.episodeId === 'string' && typeof i.updatedAt === 'number').slice(0, 500);
+  const valid = items.filter((i) => i && typeof i.episodeId === 'string' && typeof i.updatedAt === 'number').slice(0, MAX_STATES_PER_REQUEST);
   if (valid.length) {
     await env.DB.batch(
-      valid.map((i) => stmt.bind(i.episodeId, i.podcastId ?? '', Number(i.position) || 0, i.duration ?? null, i.played ? 1 : 0, i.updatedAt, now, i.skipped ? 1 : 0)),
+      valid.map((i) => stmt.bind(i.episodeId, i.podcastId ?? '', Number(i.position) || 0, i.duration ?? null, i.played ? 1 : 0, i.skipped ? 1 : 0, i.updatedAt, now)),
     );
   }
   return json({ ok: true, count: valid.length });

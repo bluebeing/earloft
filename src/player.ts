@@ -1,7 +1,22 @@
-import { getPodcast, getState, markPlayed, markSkipped, podSettings, rateFor, updatePodSettings, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
+import {
+  episodeArtwork,
+  getPodcast,
+  getState,
+  markPlayed,
+  markSkipped,
+  podSettings,
+  rateFor,
+  rememberNowPlaying,
+  removeFromQueue,
+  updateEpisodeState,
+  updateEpisodeStateNow,
+  updatePodSettings,
+  updateSettings,
+} from './library';
 import { cachedChapters, chapterIndexAt, loadChapters } from './media';
 import { flushStats, recordListening } from './stats';
-import { emit, set, state, tick } from './store';
+import { set, state, tick, toast } from './store';
+import { push } from './sync';
 
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
 const audio = new Audio();
@@ -12,14 +27,25 @@ let pendingSeek: number | null = null;
 let lastSaved = 0;
 let lastEmit = 0;
 let outroDone = false;
+/** Kapitola zobrazená na zamčené obrazovce (-2 = zatím žádná, -1 = před první kapitolou) */
 let chapterIdx = -2;
 /** Poslední pozice pro počítání odposlechnutého času (null = po skoku) */
 let lastTime: number | null = null;
 
+/** Od jaké části epizody se počítá jako přehraná */
 const PLAYED_THRESHOLD = 0.95;
+const SAVE_INTERVAL_MS = 10000;
+const TICK_INTERVAL_MS = 500;
+/** Delší posun mezi dvěma `timeupdate` je skok, ne poslech */
+const MAX_LISTEN_STEP_S = 3;
+/** Rozdíl pozice, od kterého se převezme pozice z jiného zařízení */
+const SYNC_POSITION_TOLERANCE_S = 3;
+/** Kratší rozposlouchanost se při načtení ignoruje (začne se od začátku) */
+const MIN_RESUME_S = 5;
+const RATES = [0.8, 1, 1.1, 1.2, 1.3, 1.5, 1.75, 2];
 
-function currentEpisode() {
-  return state.currentId ? state.episodes.get(state.currentId) ?? null : null;
+export function currentEpisode() {
+  return state.currentId ? (state.episodes.get(state.currentId) ?? null) : null;
 }
 
 function load(id: string) {
@@ -33,7 +59,7 @@ function load(id: string) {
   loadedId = id;
   outroDone = false;
   chapterIdx = -2;
-  pendingSeek = resumeAt > 5 || intro ? resumeAt : null;
+  pendingSeek = resumeAt > MIN_RESUME_S || intro ? resumeAt : null;
   audio.src = ep.audioUrl;
   const rate = rateFor(ep.podcastId);
   audio.defaultPlaybackRate = rate;
@@ -45,17 +71,17 @@ function load(id: string) {
 }
 
 export async function playEpisode(id: string) {
-  if (state.currentId && state.currentId !== id) saveProgress(true);
+  if (state.currentId && state.currentId !== id) saveProgressNow();
   if (loadedId !== id) {
     if (!load(id)) return;
   } else if (audio.paused) {
     // Pozice mohla přijít ze synchronizace z jiného zařízení
     const st = getState(id);
-    if (st && !st.dirty && !st.played && Math.abs(st.position - audio.currentTime) > 3) audio.currentTime = st.position;
+    if (st && !st.dirty && !st.played && Math.abs(st.position - audio.currentTime) > SYNC_POSITION_TOLERANCE_S) audio.currentTime = st.position;
   }
   if (getState(id)?.skipped) markSkipped(id, false);
   // Pokud hraje epizoda z fronty, z fronty ji vyřadíme
-  if (state.queue.includes(id)) void setQueue(state.queue.filter((x) => x !== id));
+  if (state.queue.includes(id)) void removeFromQueue(id);
   rememberNowPlaying(id);
   try {
     await audio.play();
@@ -87,7 +113,18 @@ export function seekTo(sec: number) {
   if (audio.readyState >= 1) audio.currentTime = t;
   else pendingSeek = t;
   set({ position: t });
-  saveProgress();
+  saveProgressThrottled();
+}
+
+/** Přehraje epizodu od daného času (načte ji, pokud zrovna nehraje). */
+export async function playAt(episodeId: string, time: number) {
+  if (state.currentId === episodeId && loadedId === episodeId) {
+    seekTo(time);
+    if (!state.playing) void playEpisode(episodeId);
+  } else {
+    await playEpisode(episodeId);
+    seekTo(time);
+  }
 }
 
 export const skip = (delta: number) => seekTo((audio.currentTime || state.position) + delta);
@@ -106,14 +143,22 @@ export function setRate(rate: number) {
 /** Aktuální rychlost (podle hrajícího podcastu). */
 export const currentRate = () => rateFor(currentEpisode()?.podcastId);
 
+/** Přepne na další rychlost v řadě (za nejvyšší následuje nejnižší). */
+export function cycleRate() {
+  const i = RATES.indexOf(currentRate());
+  setRate(RATES[(i + 1) % RATES.length]);
+}
+
+/** „Předchozí“ v prvních sekundách kapitoly skočí o kapitolu zpět, jinak na její začátek. */
+const RESTART_CHAPTER_WINDOW_S = 3;
+
 export function seekChapter(delta: 1 | -1) {
   const ep = currentEpisode();
   const chapters = ep ? cachedChapters(ep.id) : null;
   if (!chapters?.length) return;
   const pos = audio.currentTime || state.position;
   let i = chapterIndexAt(chapters, pos);
-  // „Předchozí“ v prvních 3 s kapitoly skočí o kapitolu zpět, jinak na její začátek
-  if (delta < 0 && i >= 0 && pos - chapters[i].start < 3) i--;
+  if (delta < 0 && i >= 0 && pos - chapters[i].start < RESTART_CHAPTER_WINDOW_S) i--;
   const target = delta > 0 ? chapters[i + 1] : chapters[Math.max(0, i)];
   if (target) seekTo(target.start);
 }
@@ -124,23 +169,47 @@ export function setSleepTimer(minutes: number | 'end' | null) {
   else set({ sleepAt: Date.now() + minutes * 60000, sleepAtEnd: false });
 }
 
-function saveProgress(force = false) {
-  const id = state.currentId;
-  if (!id || loadedId !== id || outroDone) return;
-  const pos = audio.currentTime;
-  const dur = audio.duration;
-  if (!isFinite(pos)) return;
-  const now = Date.now();
-  if (!force && now - lastSaved < 10000) return;
-  lastSaved = now;
-  const played = isFinite(dur) && dur > 0 && pos / dur >= PLAYED_THRESHOLD;
-  updateEpisodeState(id, { position: played ? 0 : pos, duration: isFinite(dur) ? dur : null, played }, force);
+/** Průběžné uložení pozice – nejvýš jednou za SAVE_INTERVAL_MS. */
+function saveProgressThrottled() {
+  if (Date.now() - lastSaved < SAVE_INTERVAL_MS) return;
+  const progress = currentProgress();
+  if (progress) updateEpisodeState(progress.id, progress.patch);
 }
 
-function next() {
+/** Okamžité uložení pozice (pauza, přepnutí epizody, schování appky). */
+function saveProgressNow() {
+  const progress = currentProgress();
+  if (progress) updateEpisodeStateNow(progress.id, progress.patch);
+}
+
+function currentProgress() {
+  const id = state.currentId;
+  if (!id || loadedId !== id || outroDone) return null;
+  const pos = audio.currentTime;
+  const dur = audio.duration;
+  if (!isFinite(pos)) return null;
+  lastSaved = Date.now();
+  const played = isFinite(dur) && dur > 0 && pos / dur >= PLAYED_THRESHOLD;
+  return { id, patch: { position: played ? 0 : pos, duration: isFinite(dur) ? dur : null, played } };
+}
+
+function playNextInQueue() {
   const nextId = state.queue.find((id) => state.episodes.has(id));
   if (nextId) void playEpisode(nextId);
   else set({ playing: false });
+}
+
+/** Konec epizody (skutečný, nebo po přeskočení závěru): označit přehrané a pustit další z fronty. */
+function finishEpisode() {
+  const id = state.currentId;
+  outroDone = true; // pauza níže už nesmí přepsat stav „přehráno“ pozicí
+  if (!audio.ended) audio.pause();
+  if (id) markPlayed(id, true);
+  if (state.sleepAtEnd) {
+    set({ sleepAtEnd: false, playing: false });
+    return;
+  }
+  playNextInQueue();
 }
 
 // ---------------------------------------------------------------------------
@@ -156,42 +225,61 @@ audio.addEventListener('loadedmetadata', () => {
 });
 
 audio.addEventListener('timeupdate', () => {
-  const now = Date.now();
-  // Statistiky: počítá se jen plynulé přehrávání, ne skoky
-  if (!audio.paused && lastTime !== null) {
-    const delta = audio.currentTime - lastTime;
-    const ep = currentEpisode();
-    if (ep && delta > 0 && delta < 3) recordListening(ep.podcastId, delta, delta / (audio.playbackRate || 1));
-  }
-  lastTime = audio.currentTime;
-  if (now - lastEmit > 500) {
-    lastEmit = now;
-    tick(audio.currentTime, isFinite(audio.duration) ? audio.duration : state.duration);
-    updatePositionState();
-  }
-  saveProgress();
-  const ep = currentEpisode();
-  // Kapitola na lock screenu
-  const chapters = ep ? cachedChapters(ep.id) : null;
-  if (chapters?.length) {
-    const idx = chapterIndexAt(chapters, audio.currentTime);
-    if (idx !== chapterIdx) {
-      chapterIdx = idx;
-      updateMediaSession(idx >= 0 ? chapters[idx].title : null);
-    }
-  }
-  // Přeskočit závěr: N sekund před koncem epizodu ukončit
-  const outro = ep ? (podSettings(ep.podcastId).skipOutro ?? 0) : 0;
-  if (outro && !outroDone && !audio.paused && isFinite(audio.duration) && audio.duration > outro * 2 && audio.duration - audio.currentTime <= outro) {
-    outroDone = true;
+  recordListeningStep();
+  emitTickThrottled();
+  saveProgressThrottled();
+  showCurrentChapter();
+  if (reachedOutro()) {
     finishEpisode();
     return;
   }
-  if (state.sleepAt && now >= state.sleepAt) {
+  stopIfSleepTimerElapsed();
+});
+
+/** Statistiky: počítá se jen plynulé přehrávání, ne skoky. */
+function recordListeningStep() {
+  const ep = currentEpisode();
+  if (ep && !audio.paused && lastTime !== null) {
+    const delta = audio.currentTime - lastTime;
+    if (delta > 0 && delta < MAX_LISTEN_STEP_S) recordListening(ep.podcastId, delta, delta / (audio.playbackRate || 1));
+  }
+  lastTime = audio.currentTime;
+}
+
+function emitTickThrottled() {
+  const now = Date.now();
+  if (now - lastEmit <= TICK_INTERVAL_MS) return;
+  lastEmit = now;
+  tick(audio.currentTime, isFinite(audio.duration) ? audio.duration : state.duration);
+  updatePositionState();
+}
+
+/** Název aktuální kapitoly na zamčené obrazovce. */
+function showCurrentChapter() {
+  const ep = currentEpisode();
+  const chapters = ep ? cachedChapters(ep.id) : null;
+  if (!chapters?.length) return;
+  const idx = chapterIndexAt(chapters, audio.currentTime);
+  if (idx === chapterIdx) return;
+  chapterIdx = idx;
+  updateMediaSession(idx >= 0 ? chapters[idx].title : null);
+}
+
+/** Přeskočení závěru: posledních N sekund (podle nastavení podcastu) se nehraje. */
+function reachedOutro(): boolean {
+  const ep = currentEpisode();
+  const outro = ep ? (podSettings(ep.podcastId).skipOutro ?? 0) : 0;
+  const dur = audio.duration;
+  // U krátké epizody by „závěr“ mohl být většina obsahu – pak se nepřeskakuje
+  return !!outro && !outroDone && !audio.paused && isFinite(dur) && dur > outro * 2 && dur - audio.currentTime <= outro;
+}
+
+function stopIfSleepTimerElapsed() {
+  if (state.sleepAt && Date.now() >= state.sleepAt) {
     audio.pause();
     set({ sleepAt: null });
   }
-});
+}
 
 audio.addEventListener('seeking', () => (lastTime = null));
 audio.addEventListener('playing', () => set({ playing: true, buffering: false }));
@@ -201,7 +289,7 @@ audio.addEventListener('pause', () => {
   set({ playing: false, buffering: false });
   lastTime = null;
   flushStats();
-  saveProgress(true);
+  saveProgressNow();
   void push().catch(() => {});
 });
 audio.addEventListener('ratechange', () => {
@@ -209,34 +297,21 @@ audio.addEventListener('ratechange', () => {
   const rate = currentRate();
   if (audio.playbackRate !== rate && !audio.paused) audio.playbackRate = rate;
 });
-audio.addEventListener('ended', () => finishEpisode());
-
-/** Konec epizody (skutečný, nebo po přeskočení závěru): označit přehrané a pustit další z fronty. */
-function finishEpisode() {
-  const id = state.currentId;
-  outroDone = true; // pauza níže už nesmí přepsat stav „přehráno“ pozicí
-  if (!audio.ended) audio.pause();
-  if (id) markPlayed(id, true);
-  if (state.sleepAtEnd) {
-    set({ sleepAtEnd: false, playing: false });
-    return;
-  }
-  next();
-}
+audio.addEventListener('ended', finishEpisode);
 audio.addEventListener('error', () => {
   set({ playing: false, buffering: false });
-  if (audio.src) window.dispatchEvent(new CustomEvent('podcasty:toast', { detail: 'Epizodu se nepodařilo přehrát' }));
+  if (audio.src) toast('Epizodu se nepodařilo přehrát');
 });
 
 // Při schování appky uložit pozici a odeslat na server
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     flushStats();
-    saveProgress(true);
+    saveProgressNow();
     void push(true).catch(() => {});
   }
 });
-window.addEventListener('pagehide', () => saveProgress(true));
+window.addEventListener('pagehide', saveProgressNow);
 
 // ---------------------------------------------------------------------------
 // Media Session – ovládání ze zamčené obrazovky, AirPods, CarPlay
@@ -246,7 +321,7 @@ function updateMediaSession(chapter: string | null = null) {
   const ep = currentEpisode();
   if (!ep) return;
   const pod = getPodcast(ep.podcastId);
-  const art = ep.artworkUrl || pod?.artworkUrl;
+  const art = episodeArtwork(ep);
   navigator.mediaSession.metadata = new MediaMetadata({
     title: ep.title,
     artist: chapter ? `${chapter} · ${pod?.title ?? ''}` : (pod?.title ?? ''),
@@ -267,34 +342,28 @@ function updatePositionState() {
 }
 
 if ('mediaSession' in navigator) {
-  const ms = navigator.mediaSession;
-  const h = (action: MediaSessionAction, fn: MediaSessionActionHandler) => {
+  const setHandler = (action: MediaSessionAction, fn: MediaSessionActionHandler) => {
     try {
-      ms.setActionHandler(action, fn);
+      navigator.mediaSession.setActionHandler(action, fn);
     } catch {
       /* nepodporovaná akce */
     }
   };
-  h('play', () => state.currentId && void playEpisode(state.currentId));
-  h('pause', () => audio.pause());
-  h('seekbackward', (d) => skip(-(d.seekOffset || state.settings.skipBack)));
-  h('seekforward', (d) => skip(d.seekOffset || state.settings.skipForward));
-  h('seekto', (d) => d.seekTime != null && seekTo(d.seekTime));
+  setHandler('play', () => state.currentId && void playEpisode(state.currentId));
+  setHandler('pause', () => audio.pause());
+  setHandler('seekbackward', (d) => skip(-(d.seekOffset || state.settings.skipBack)));
+  setHandler('seekforward', (d) => skip(d.seekOffset || state.settings.skipForward));
+  setHandler('seekto', (d) => d.seekTime != null && seekTo(d.seekTime));
   // Na iOS se místo ±skip jinak zobrazí předchozí/další – mapujeme je na posun
-  h('previoustrack', () => skipBack());
-  h('nexttrack', () => skipForward());
+  setHandler('previoustrack', skipBack);
+  setHandler('nexttrack', skipForward);
 }
 
 /** Po startu appky zobrazit v mini-přehrávači naposledy hranou epizodu (bez přehrávání). */
 export function restoreLastEpisode() {
-  const id = state.currentId;
-  if (!id) return;
-  const ep = state.episodes.get(id);
+  const ep = currentEpisode();
   if (!ep) return;
-  const st = getState(id);
+  const st = getState(ep.id);
   set({ position: st && !st.played ? st.position : 0, duration: ep.duration ?? st?.duration ?? 0 });
   updateMediaSession();
-  emit();
 }
-
-export const isLoaded = (id: string) => loadedId === id;

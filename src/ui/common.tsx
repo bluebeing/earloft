@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { getPodcast, markPlayed, markSkipped, playLast, playNext, removeFromQueue } from '../library';
+import { episodeArtwork, getPodcast, markPlayed, markSkipped, playLast, playNext, removeFromQueue } from '../library';
 import { playEpisode, togglePlay } from '../player';
 import { state, useStore, useTick } from '../store';
 import type { Episode } from '../types';
@@ -11,7 +11,7 @@ import { BackIcon, CheckIcon, MoreIcon, PauseIcon, PlayIcon } from './icons';
 // Hash router: #/library, #/podcast/ID …
 
 export type NavDir = 'forward' | 'back' | 'tab' | 'none';
-export const TAB_ROOTS = ['#/', '#/library', '#/overview', '#/search', '#/settings'];
+const TAB_ROOTS = ['#/', '#/library', '#/overview', '#/search', '#/settings'];
 
 const currentHash = () => (location.hash && location.hash !== '#' ? location.hash : '#/');
 /** Vlastní zásobník historie – podle něj poznáme směr navigace (animace) a kam vrátit scroll. */
@@ -146,11 +146,17 @@ export function showActions(title: string | undefined, actions: Action[]) {
   openSheet?.({ title, actions });
 }
 
+const CLOSE_ANIMATION_MS = 240;
+/** Stažení tahem: dost daleko, nebo kratší, ale rychlé švihnutí */
+const SWIPE_CLOSE_DISTANCE = 120;
+const FLICK_MIN_DISTANCE = 30;
+const FLICK_MIN_VELOCITY = 0.5;
+
 /**
- * Zavírání s animací (+ volitelně stažení tahem dolů jako v iOS).
+ * Zavírání s animací a stažením tahem dolů jako v iOS.
  * `open` = je prvek právě zobrazený (aby se listenery navěsily až na existující DOM).
  */
-export function useDismiss(onClosed: () => void, open: boolean, swipe = false) {
+export function useDismiss(onClosed: () => void, open: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
   const closedRef = useRef(onClosed);
@@ -162,12 +168,12 @@ export function useDismiss(onClosed: () => void, open: boolean, swipe = false) {
     setTimeout(() => {
       setClosing(false);
       closedRef.current();
-    }, 240);
+    }, CLOSE_ANIMATION_MS);
   };
 
   useEffect(() => {
     const el = ref.current;
-    if (!swipe || !open || !el) return;
+    if (!open || !el) return;
     let startY = 0;
     let dy = 0;
     let t0 = 0;
@@ -194,7 +200,7 @@ export function useDismiss(onClosed: () => void, open: boolean, swipe = false) {
       active = false;
       const velocity = dy / Math.max(1, Date.now() - t0);
       el.style.transition = 'transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1)';
-      if (dy > 120 || (dy > 30 && velocity > 0.5)) {
+      if (dy > SWIPE_CLOSE_DISTANCE || (dy > FLICK_MIN_DISTANCE && velocity > FLICK_MIN_VELOCITY)) {
         el.style.transform = 'translateY(100%)';
         setTimeout(() => closedRef.current(), 250);
       } else {
@@ -211,14 +217,14 @@ export function useDismiss(onClosed: () => void, open: boolean, swipe = false) {
       el.removeEventListener('touchend', end);
       el.removeEventListener('touchcancel', end);
     };
-  }, [swipe, open]);
+  }, [open]);
 
   return { ref, closing, close };
 }
 
 export function ActionSheetHost() {
   const [sheet, setSheet] = useState<{ title?: string; actions: Action[] } | null>(null);
-  const { ref, closing, close } = useDismiss(() => setSheet(null), !!sheet, true);
+  const { ref, closing, close } = useDismiss(() => setSheet(null), !!sheet);
   useEffect(() => {
     openSheet = setSheet;
     return () => void (openSheet = null);
@@ -311,7 +317,7 @@ export function EpisodeRow({ ep, showPodcast }: { ep: Episode; showPodcast?: boo
   const st = useStore().states.get(ep.id);
   return (
     <div class={`episode-row${st?.played || st?.skipped ? ' played' : ''}`} onClick={() => go(`/episode/${ep.id}`)}>
-      {showPodcast && <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={56} />}
+      {showPodcast && <Artwork src={episodeArtwork(ep)} size={56} />}
       <div class="episode-body">
         <div class="episode-meta">
           {showPodcast && pod ? `${pod.title} · ` : ''}
@@ -365,8 +371,7 @@ export function useIsDesktop(): boolean {
   return desk;
 }
 
-/** „Nenalezeno“ bez závislosti na obrazovkách (pro pomocné stránky) */
-export function NotFoundInline() {
+export function NotFound() {
   return (
     <div class="screen">
       <Header title="" back />

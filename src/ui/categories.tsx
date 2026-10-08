@@ -1,33 +1,26 @@
 import { useEffect, useState } from 'preact/hooks';
-import { activePodcasts, createCategory, deleteCategory, moveCategory, renameCategory, togglePodcastCategory } from '../library';
-import { emit, state, useStore } from '../store';
+import { NO_CATEGORY, activePodcasts, createCategory, deleteCategory, moveCategory, renameCategory, togglePodcastCategory } from '../library';
+import { readLocal, writeLocal } from '../storage';
+import { emit, useStore } from '../store';
 import { Header, useDismiss } from './common';
 import { CheckIcon, PlusIcon } from './icons';
 
-/** Zvolená kategorie zapamatovaná pro danou obrazovku (jen na tomto zařízení). */
-export function useCategoryFilter(key: string): [string | null, (v: string | null) => void] {
-  const storageKey = `podcasty.cat.${key}`;
-  const [value, setValue] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(storageKey);
-    } catch {
-      return null;
-    }
-  });
+/** Klíč, pod kterým si obrazovka pamatuje zvolenou kategorii (jen na tomto zařízení). */
+export const categoryFilterKey = (screen: string) => `podcasty.cat.${screen}`;
+
+/** Zvolená kategorie zapamatovaná pro danou obrazovku. */
+export function useCategoryFilter(screen: string): [string | null, (v: string | null) => void] {
+  const storageKey = categoryFilterKey(screen);
+  const [value, setValue] = useState<string | null>(() => readLocal(storageKey));
   const s = useStore();
   // Smazaná kategorie → zpět na „Vše“
-  const valid = value === null || value === '__none' || s.categories.some((c) => c.id === value) ? value : null;
-  const set = (v: string | null) => {
+  const valid = value === null || value === NO_CATEGORY || s.categories.some((c) => c.id === value) ? value : null;
+  const choose = (v: string | null) => {
     setValue(v);
-    try {
-      if (v) localStorage.setItem(storageKey, v);
-      else localStorage.removeItem(storageKey);
-    } catch {
-      /* ignore */
-    }
+    writeLocal(storageKey, v);
     emit(); // boční panel zvýrazní zvolenou kategorii
   };
-  return [valid, set];
+  return [valid, choose];
 }
 
 export function CategoryChips({
@@ -63,7 +56,7 @@ export function CategoryChips({
           {c.name}
         </button>
       ))}
-      <button class={`chip${value === '__none' ? ' on' : ''}`} onClick={() => onChange('__none')}>
+      <button class={`chip${value === NO_CATEGORY ? ' on' : ''}`} onClick={() => onChange(NO_CATEGORY)}>
         Bez kategorie
       </button>
       {showManage && (
@@ -84,27 +77,12 @@ export const pickCategories = (podcastId: string) => openPicker?.(podcastId);
 export function CategoryPickerHost() {
   const s = useStore();
   const [podcastId, setPodcastId] = useState<string | null>(null);
-  const [name, setName] = useState('');
   useEffect(() => {
     openPicker = setPodcastId;
     return () => void (openPicker = null);
   }, []);
-  const { ref, closing, close } = useDismiss(
-    () => {
-      setPodcastId(null);
-      setName('');
-    },
-    !!podcastId,
-    true,
-  );
+  const { ref, closing, close } = useDismiss(() => setPodcastId(null), !!podcastId);
   if (!podcastId) return null;
-  const add = async (e: Event) => {
-    e.preventDefault();
-    const value = name.trim();
-    if (!value) return;
-    setName('');
-    await createCategory(value, podcastId);
-  };
 
   return (
     <div class={`sheet-backdrop${closing ? ' closing' : ''}`} onClick={close}>
@@ -120,17 +98,7 @@ export function CategoryPickerHost() {
               </button>
             );
           })}
-          <form class="new-category" onSubmit={add}>
-            <input
-              placeholder="Nová kategorie"
-              value={name}
-              enterKeyHint="done"
-              onInput={(e) => setName((e.target as HTMLInputElement).value)}
-            />
-            <button class="icon-btn add" disabled={!name.trim()} aria-label="Přidat kategorii">
-              <PlusIcon size={18} />
-            </button>
-          </form>
+          <NewCategoryForm class="new-category" podcastId={podcastId} />
         </div>
         <button class="action action-cancel" onClick={close}>
           Hotovo
@@ -145,16 +113,7 @@ export function CategoryPickerHost() {
 
 export function CategoriesPage() {
   const s = useStore();
-  const [name, setName] = useState('');
   const active = new Set(activePodcasts().map((p) => p.id));
-
-  const add = async (e: Event) => {
-    e.preventDefault();
-    const value = name.trim();
-    if (!value) return;
-    setName('');
-    await createCategory(value);
-  };
 
   return (
     <div class="screen">
@@ -192,15 +151,28 @@ export function CategoriesPage() {
             </button>
           </div>
         ))}
-        <form class="form-row new-category" onSubmit={add}>
-          <input placeholder="Nová kategorie" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-          <button class="icon-btn add" disabled={!name.trim()} aria-label="Přidat kategorii">
-            <PlusIcon size={18} />
-          </button>
-        </form>
+        <NewCategoryForm class="form-row new-category" />
       </div>
     </div>
   );
 }
 
-export const categoryNamesFor = (podcastId: string) => state.categories.filter((c) => c.podcastIds.includes(podcastId)).map((c) => c.name);
+/** Políčko pro založení kategorie; s `podcastId` do ní podcast rovnou zařadí. */
+function NewCategoryForm({ class: cls, podcastId }: { class: string; podcastId?: string }) {
+  const [name, setName] = useState('');
+  const add = async (e: Event) => {
+    e.preventDefault();
+    const value = name.trim();
+    if (!value) return;
+    setName('');
+    await createCategory(value, podcastId);
+  };
+  return (
+    <form class={cls} onSubmit={add}>
+      <input placeholder="Nová kategorie" value={name} enterKeyHint="done" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+      <button class="icon-btn add" disabled={!name.trim()} aria-label="Přidat kategorii">
+        <PlusIcon size={18} />
+      </button>
+    </form>
+  );
+}

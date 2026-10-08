@@ -103,3 +103,18 @@ export function appleIdFromUrl(text: string): string | null {
   const m = text.match(/(?:podcasts|itunes)\.apple\.com\/.*?id(\d{5,})/i);
   return m ? m[1] : null;
 }
+
+/** Krátké náhodné ID (záložky, kategorie, zařízení). */
+export const randomId = () => Math.random().toString(36).slice(2, 10);
+
+/** Text chyby pro uživatele. */
+export const errorMessage = (e: unknown, fallback?: string) => (e instanceof Error ? e.message : (fallback ?? String(e)));
+
+/** Nabídne vygenerovaný text ke stažení jako soubor. */
+export function downloadFile(filename: string, content: string, type: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}

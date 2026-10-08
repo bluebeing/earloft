@@ -1,7 +1,8 @@
-import { getPodcast, kvEntries, writeKv } from './library';
-import { deviceId } from './stats';
+import { kvEntries, readKv, writeKv } from './kv';
+import { getPodcast } from './library';
+import { deviceId } from './storage';
 import { emit, state, toast } from './store';
-import { formatClock } from './util';
+import { formatClock, randomId } from './util';
 
 /**
  * Záložky v epizodách. Každé zařízení zapisuje do vlastního klíče `bookmarks-<zařízení>`,
@@ -21,16 +22,19 @@ export interface Bookmark {
 
 const ownKey = () => `bookmarks-${deviceId()}`;
 
+/** Záložka spolu s kv klíčem zařízení, pod kterým je uložená. */
+export type StoredBookmark = Bookmark & { key: string };
+
 /** Všechny záložky ze všech zařízení, od nejnovější. */
-export function allBookmarks(): (Bookmark & { key: string })[] {
-  const out: (Bookmark & { key: string })[] = [];
+export function allBookmarks(): StoredBookmark[] {
+  const out: StoredBookmark[] = [];
   for (const rec of kvEntries('bookmarks-')) {
     if (Array.isArray(rec.value)) for (const b of rec.value as Bookmark[]) out.push({ ...b, key: rec.key });
   }
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-const listFor = (key: string) => (kvEntries(key).find((r) => r.key === key)?.value as Bookmark[] | undefined) ?? [];
+const listFor = (key: string) => readKv<Bookmark[]>(key) ?? [];
 
 async function saveList(key: string, list: Bookmark[]) {
   await writeKv(key, list);
@@ -41,7 +45,7 @@ export async function addBookmark(episodeId: string, time: number): Promise<Book
   const ep = state.episodes.get(episodeId);
   if (!ep) return null;
   const b: Bookmark = {
-    id: Math.random().toString(36).slice(2, 10),
+    id: randomId(),
     episodeId,
     podcastId: ep.podcastId,
     time: Math.max(0, Math.round(time)),
@@ -72,10 +76,10 @@ export async function deleteBookmark(b: { id: string; key: string }) {
 
 /** Export do Markdownu (Obsidian, Notion, Bear…), seskupeno podle epizod. */
 export function bookmarksMarkdown(): string {
-  const groups = new Map<string, (Bookmark & { key: string })[]>();
+  const groups = new Map<string, StoredBookmark[]>();
   for (const b of allBookmarks().sort((a, b) => a.time - b.time)) {
-    const g = groups.get(b.episodeId);
-    if (g) g.push(b);
+    const group = groups.get(b.episodeId);
+    if (group) group.push(b);
     else groups.set(b.episodeId, [b]);
   }
   const lines = ['# Záložky z podcastů', ''];

@@ -2,19 +2,22 @@ import { appleLookupUrl, appleSearchUrl, appleTopUrl, parseLookup, parseSearch, 
 import { api, apiJson, getToken } from './api';
 import * as idb from './db';
 import { parseFeed, type ParsedFeed } from './feed';
-import { DEFAULT_SETTINGS, emit, indexEpisodes, rebuildIndex, set, state, toast } from './store';
-import type { ApplePodcast, Category, Episode, EpisodeState, KvRecord, Podcast, PodcastSettings, Settings } from './types';
-import { hashId, looksPrivate, podcastIdFor, pool } from './util';
+import { applyKv, writeKv } from './kv';
+import { emit, indexEpisodes, rebuildIndex, set, state } from './store';
+import { schedulePush, sync } from './sync';
+import type { ApplePodcast, Category, Episode, EpisodeState, Podcast, PodcastSettings, Settings } from './types';
+import { errorMessage, hashId, looksPrivate, podcastIdFor, pool, randomId } from './util';
 
-const kvMeta = new Map<string, KvRecord>();
-const LAST_SYNC_KEY = 'podcasty.lastSync';
-
-/** Podcasty otevřené jen na prohlédnutí (bez odběru). */
+/** Podcasty otevřené jen na prohlédnutí (bez odběru) a jejich poznámky k epizodám. */
 const previews = new Map<string, Podcast>();
+const previewNotes = new Map<string, Map<string, string>>();
 
 export const getPodcast = (id: string) => state.podcasts.get(id) ?? previews.get(id) ?? null;
 export const activePodcasts = () => [...state.podcasts.values()].filter((p) => !p.deleted);
 export const isSubscribed = (id: string) => !!state.podcasts.get(id) && !state.podcasts.get(id)!.deleted;
+
+/** Obal epizody, jinak obal podcastu. */
+export const episodeArtwork = (ep: Episode | null | undefined) => ep?.artworkUrl || (ep && getPodcast(ep.podcastId)?.artworkUrl) || null;
 
 // ---------------------------------------------------------------------------
 // Start
@@ -29,30 +32,10 @@ export async function init() {
   set({ ready: true, authed: !!getToken() });
 }
 
-function applyKv(rec: KvRecord) {
-  kvMeta.set(rec.key, rec);
-  if (rec.key === 'queue' && Array.isArray(rec.value)) state.queue = rec.value as string[];
-  if (rec.key === 'categories' && Array.isArray(rec.value)) state.categories = rec.value as Category[];
-  if (rec.key === 'podcastSettings' && rec.value && typeof rec.value === 'object') state.podSettings = rec.value as Record<string, PodcastSettings>;
-  if (rec.key === 'settings' && rec.value) state.settings = { ...DEFAULT_SETTINGS, ...(rec.value as Settings) };
-  if (rec.key === 'nowPlaying' && typeof rec.value === 'string' && !state.currentId) state.currentId = rec.value;
-}
-
-export async function writeKv(key: string, value: unknown) {
-  const rec: KvRecord = { key, value, updatedAt: Date.now(), dirty: true };
-  kvMeta.set(key, rec);
-  await idb.putKv(rec);
-  schedulePush();
-}
-
-/** Záznamy kv podle prefixu (např. statistiky ze všech zařízení). */
-export const kvEntries = (prefix: string) => [...kvMeta.values()].filter((r) => r.key.startsWith(prefix));
-
 // ---------------------------------------------------------------------------
 // Feedy
 
 interface FetchResult {
-  notModified: boolean;
   parsed?: ParsedFeed;
   etag: string | null;
   lastModified: string | null;
@@ -61,25 +44,26 @@ interface FetchResult {
 
 /** Zvýšit při změně parseru – vynutí nové zpracování všech feedů. */
 const PARSER_VERSION = 2;
+const AUTO_QUEUE_MAX_AGE_MS = 7 * 86400000;
 
 /** Pustí prohlížeč ke slovu (vykreslení, dotyk) před náročnou prací. */
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
-async function fetchFeed(feedUrl: string, podcastId: string, cond?: Podcast): Promise<FetchResult> {
+/** Stáhne feed; `cached` = dřívější stav pro podmíněný dotaz. Beze změny vrátí výsledek bez `parsed`. */
+async function fetchFeed(feedUrl: string, podcastId: string, cached?: Podcast): Promise<FetchResult> {
   const headers: Record<string, string> = {};
-  if (cond?.etag) headers['if-none-match'] = cond.etag;
-  if (cond?.lastModified) headers['if-modified-since'] = cond.lastModified;
+  if (cached?.etag) headers['if-none-match'] = cached.etag;
+  if (cached?.lastModified) headers['if-modified-since'] = cached.lastModified;
   const res = await api(`/api/feed?url=${encodeURIComponent(feedUrl)}`, { headers });
   const etag = res.headers.get('etag');
   const lastModified = res.headers.get('last-modified');
-  if (res.status === 304) return { notModified: true, etag, lastModified, contentHash: cond?.contentHash };
+  if (res.status === 304) return { etag, lastModified, contentHash: cached?.contentHash };
   const text = await res.text();
   // Mnoho serverů ETag nepodporuje – feed beze změny poznáme podle otisku a nemusíme ho parsovat
   const contentHash = `${PARSER_VERSION}:${text.length}:${hashId(text)}`;
-  if (cond?.contentHash === contentHash) return { notModified: true, etag, lastModified, contentHash };
+  if (cached?.contentHash === contentHash) return { etag, lastModified, contentHash };
   await yieldToMain();
-  const parsed = parseFeed(text, podcastId);
-  return { notModified: false, parsed, etag, lastModified, contentHash };
+  return { parsed: parseFeed(text, podcastId), etag, lastModified, contentHash };
 }
 
 function storeEpisodes(podcastId: string, episodes: Episode[]) {
@@ -88,48 +72,68 @@ function storeEpisodes(podcastId: string, episodes: Episode[]) {
   indexEpisodes(podcastId);
 }
 
-export async function refreshPodcast(p: Podcast, force = false) {
+/** Odstraní epizody podcastu z paměti i z lokální databáze. */
+export async function dropPodcastEpisodes(podcastId: string) {
+  for (const [id, e] of state.episodes) if (e.podcastId === podcastId) state.episodes.delete(id);
+  state.byPodcast.delete(podcastId);
+  await idb.deletePodcastData(podcastId);
+}
+
+/** `ignoreCache` = stáhnout a zpracovat feed, i když se podle serveru nezměnil. */
+export async function refreshPodcast(p: Podcast, { ignoreCache = false } = {}) {
   try {
     // Bez uložených epizod nemá smysl podmíněný dotaz (304 by nic nepřinesl)
     const hasEpisodes = (state.byPodcast.get(p.id)?.length ?? 0) > 0;
-    const r = await fetchFeed(p.feedUrl, p.id, force || !hasEpisodes ? undefined : p);
+    const result = await fetchFeed(p.feedUrl, p.id, ignoreCache || !hasEpisodes ? undefined : p);
     const prev = state.podcasts.get(p.id)!;
-    const next: Podcast = { ...prev, lastFetchedAt: Date.now(), fetchError: null, etag: r.etag, lastModified: r.lastModified, contentHash: r.contentHash };
-    if (r.parsed) {
-      next.description = r.parsed.description;
-      next.link = r.parsed.link ?? undefined;
-      // Obal a název z feedu mají přednost (mohou se změnit)
-      next.title = r.parsed.title || next.title;
-      next.author = r.parsed.author ?? next.author;
-      next.artworkUrl = r.parsed.artworkUrl ?? next.artworkUrl;
-      const prevIds = new Set((state.byPodcast.get(p.id) ?? []).map((e) => e.id));
-      storeEpisodes(p.id, r.parsed.episodes);
-      await idb.replaceEpisodes(p.id, r.parsed.episodes, r.parsed.notes);
-      if (prevIds.size && state.podSettings[p.id]?.autoQueue) {
-        const weekAgo = Date.now() - 7 * 86400000;
-        const fresh = r.parsed.episodes.filter((e) => !prevIds.has(e.id) && e.pubDate > weekAgo && !state.queue.includes(e.id));
-        if (fresh.length) await setQueue([...state.queue, ...fresh.reverse().map((e) => e.id)]);
-      }
-    }
-    state.podcasts.set(p.id, next);
-    await idb.putPodcast(next);
+    let next: Podcast = { ...prev, lastFetchedAt: Date.now(), fetchError: null, etag: result.etag, lastModified: result.lastModified, contentHash: result.contentHash };
+    if (result.parsed) next = await applyParsedFeed(next, result.parsed);
+    await savePodcast(next);
     // Beze změny není co překreslovat
-    if (!r.parsed && !prev.fetchError) return;
+    if (!result.parsed && !prev.fetchError) return;
   } catch (e) {
-    const next = { ...state.podcasts.get(p.id)!, fetchError: e instanceof Error ? e.message : String(e) };
-    state.podcasts.set(p.id, next);
-    await idb.putPodcast(next);
+    await savePodcast({ ...state.podcasts.get(p.id)!, fetchError: errorMessage(e) });
   }
   emit();
 }
 
-export async function refreshAll(force = false) {
+async function applyParsedFeed(p: Podcast, feed: ParsedFeed): Promise<Podcast> {
+  const previousIds = new Set((state.byPodcast.get(p.id) ?? []).map((e) => e.id));
+  storeEpisodes(p.id, feed.episodes);
+  await idb.replaceEpisodes(p.id, feed.episodes, feed.notes);
+  // Při úplně prvním stažení jsou „nové“ všechny díly – do fronty jen to, co přibylo
+  if (previousIds.size) await autoQueueNewEpisodes(p.id, feed.episodes.filter((e) => !previousIds.has(e.id)));
+  return {
+    ...p,
+    description: feed.description,
+    link: feed.link ?? undefined,
+    // Obal a název z feedu mají přednost (mohou se změnit)
+    title: feed.title || p.title,
+    author: feed.author ?? p.author,
+    artworkUrl: feed.artworkUrl ?? p.artworkUrl,
+  };
+}
+
+async function autoQueueNewEpisodes(podcastId: string, added: Episode[]) {
+  if (!state.podSettings[podcastId]?.autoQueue) return;
+  const minDate = Date.now() - AUTO_QUEUE_MAX_AGE_MS;
+  const fresh = added.filter((e) => e.pubDate > minDate && !state.queue.includes(e.id));
+  // Epizody jsou od nejnovější – do fronty od nejstarší
+  if (fresh.length) await setQueue([...state.queue, ...fresh.reverse().map((e) => e.id)]);
+}
+
+async function savePodcast(p: Podcast) {
+  state.podcasts.set(p.id, p);
+  await idb.putPodcast(p);
+}
+
+export async function refreshAll() {
   if (state.refreshing) return;
   set({ refreshing: true });
   try {
     // Nejdřív synchronizace (může přinést nové odběry z jiného zařízení)
     await sync().catch(() => {});
-    await pool(activePodcasts(), 4, (p) => refreshPodcast(p, force));
+    await pool(activePodcasts(), 4, (p) => refreshPodcast(p));
   } finally {
     set({ refreshing: false });
   }
@@ -139,36 +143,36 @@ export async function refreshAll(force = false) {
 export async function previewFeed(feedUrl: string, hint?: Partial<Podcast>): Promise<Podcast> {
   const id = podcastIdFor(feedUrl);
   if (isSubscribed(id)) return state.podcasts.get(id)!;
-  const r = await fetchFeed(feedUrl, id);
-  const parsed = r.parsed!;
+  const result = await fetchFeed(feedUrl, id);
+  const feed = result.parsed!;
   const p: Podcast = {
     id,
     feedUrl,
-    title: parsed.title || hint?.title || feedUrl,
-    author: parsed.author ?? hint?.author ?? null,
-    artworkUrl: parsed.artworkUrl ?? hint?.artworkUrl ?? null,
+    title: feed.title || hint?.title || feedUrl,
+    author: feed.author ?? hint?.author ?? null,
+    artworkUrl: feed.artworkUrl ?? hint?.artworkUrl ?? null,
     source: hint?.source ?? 'rss',
     appleId: hint?.appleId ?? null,
     isPrivate: hint?.source === 'apple' ? false : looksPrivate(feedUrl),
     addedAt: 0,
     updatedAt: 0,
-    description: parsed.description,
-    link: parsed.link ?? undefined,
-    etag: r.etag,
-    lastModified: r.lastModified,
-    contentHash: r.contentHash,
+    description: feed.description,
+    link: feed.link ?? undefined,
+    etag: result.etag,
+    lastModified: result.lastModified,
+    contentHash: result.contentHash,
   };
   previews.set(id, p);
-  previewNotes.set(id, parsed.notes);
-  storeEpisodes(id, parsed.episodes);
+  previewNotes.set(id, feed.notes);
+  storeEpisodes(id, feed.episodes);
   emit();
   return p;
 }
-const previewNotes = new Map<string, Map<string, string>>();
 
 export async function getEpisodeNotes(episodeId: string): Promise<string | null> {
   const ep = state.episodes.get(episodeId);
-  if (ep && previewNotes.has(ep.podcastId)) return previewNotes.get(ep.podcastId)!.get(episodeId) ?? null;
+  const notes = ep && previewNotes.get(ep.podcastId);
+  if (notes) return notes.get(episodeId) ?? null;
   return idb.getNotes(episodeId);
 }
 
@@ -176,36 +180,24 @@ export async function subscribe(feedUrl: string, hint?: Partial<Podcast>): Promi
   feedUrl = feedUrl.trim();
   const id = podcastIdFor(feedUrl);
   if (isSubscribed(id)) return id;
-  let preview = previews.get(id);
-  if (!preview) preview = await previewFeed(feedUrl, hint);
+  const preview = previews.get(id) ?? (await previewFeed(feedUrl, hint));
   const now = Date.now();
-  const p: Podcast = { ...preview, addedAt: now, updatedAt: now, deleted: false, dirty: true };
   previews.delete(id);
-  state.podcasts.set(id, p);
-  await idb.putPodcast(p);
-  const eps = state.byPodcast.get(id) ?? [];
-  await idb.replaceEpisodes(id, eps, previewNotes.get(id) ?? new Map());
+  await savePodcast({ ...preview, addedAt: now, updatedAt: now, deleted: false, dirty: true });
+  await idb.replaceEpisodes(id, state.byPodcast.get(id) ?? [], previewNotes.get(id) ?? new Map());
   previewNotes.delete(id);
   emit();
   schedulePush(0);
   return id;
 }
 
-export async function subscribeApple(a: ApplePodcast): Promise<string> {
-  const info = a.feedUrl ? a : await appleLookup(a.appleId);
-  if (!info?.feedUrl) throw new Error('Tento podcast je na Apple Podcasts jen v placeném předplatném a nemá veřejné RSS.');
-  return subscribe(info.feedUrl, { source: 'apple', appleId: a.appleId, title: a.title, author: a.author, artworkUrl: a.artworkUrl });
-}
-
 export async function unsubscribe(id: string) {
   const p = state.podcasts.get(id);
   if (!p) return;
-  const tomb: Podcast = { ...p, deleted: true, dirty: true, updatedAt: Date.now() };
-  state.podcasts.set(id, tomb);
-  for (const [eid, e] of state.episodes) if (e.podcastId === id) state.episodes.delete(eid);
-  state.byPodcast.delete(id);
-  await idb.deletePodcastData(id);
-  await idb.putPodcast(tomb);
+  const tombstone: Podcast = { ...p, deleted: true, dirty: true, updatedAt: Date.now() };
+  state.podcasts.set(id, tombstone);
+  await dropPodcastEpisodes(id);
+  await idb.putPodcast(tombstone);
   const queue = state.queue.filter((eid) => state.episodes.has(eid));
   if (queue.length !== state.queue.length) await setQueue(queue);
   emit();
@@ -215,9 +207,7 @@ export async function unsubscribe(id: string) {
 export async function setPodcastPrivate(id: string, isPrivate: boolean) {
   const p = state.podcasts.get(id);
   if (!p) return;
-  const next = { ...p, isPrivate, dirty: true, updatedAt: Date.now() };
-  state.podcasts.set(id, next);
-  await idb.putPodcast(next);
+  await savePodcast({ ...p, isPrivate, dirty: true, updatedAt: Date.now() });
   emit();
   schedulePush();
 }
@@ -240,17 +230,40 @@ export const appleSearch = (q: string) => appleDirect(appleSearchUrl(q), parseSe
 export const appleTop = () => appleDirect(appleTopUrl(), parseTop, '/api/apple/top?country=cz');
 export const appleLookup = (id: string) => appleDirect(appleLookupUrl(id), parseLookup, `/api/apple/lookup?id=${id}`);
 
+/** RSS adresa podcastu z Apple (žebříček ji neobsahuje – dohledá se). */
+async function appleFeedUrl(a: ApplePodcast): Promise<string> {
+  const info = a.feedUrl ? a : await appleLookup(a.appleId);
+  if (!info?.feedUrl) throw new Error('Tento podcast je na Apple Podcasts jen v placeném předplatném a nemá veřejné RSS.');
+  return info.feedUrl;
+}
+
+const appleHint = (a: ApplePodcast): Partial<Podcast> => ({ source: 'apple', appleId: a.appleId, title: a.title, author: a.author, artworkUrl: a.artworkUrl });
+
+export const previewApple = async (a: ApplePodcast) => previewFeed(await appleFeedUrl(a), appleHint(a));
+export const subscribeApple = async (a: ApplePodcast) => subscribe(await appleFeedUrl(a), appleHint(a));
+
 // ---------------------------------------------------------------------------
-// Stav poslechu, fronta, nastavení
+// Stav poslechu, fronta
 
 export function getState(episodeId: string): EpisodeState | undefined {
   return state.states.get(episodeId);
 }
 
+const STATE_WRITE_DELAY_MS = 1000;
 let stateWriteTimer: number | undefined;
 const pendingStateWrites = new Map<string, EpisodeState>();
 
-export function updateEpisodeState(episodeId: string, patch: Partial<Pick<EpisodeState, 'position' | 'duration' | 'played' | 'skipped'>>, persistNow = false) {
+function flushStateWrites() {
+  clearTimeout(stateWriteTimer);
+  const items = [...pendingStateWrites.values()];
+  pendingStateWrites.clear();
+  void idb.putStates(items);
+}
+
+type EpisodeStatePatch = Partial<Pick<EpisodeState, 'position' | 'duration' | 'played' | 'skipped'>>;
+
+/** Změní stav epizody; do databáze se zapíše s malým zpožděním (průběžná pozice se mění často). */
+export function updateEpisodeState(episodeId: string, patch: EpisodeStatePatch) {
   const ep = state.episodes.get(episodeId);
   const prev = state.states.get(episodeId);
   const next: EpisodeState = {
@@ -268,23 +281,23 @@ export function updateEpisodeState(episodeId: string, patch: Partial<Pick<Episod
   pendingStateWrites.set(episodeId, next);
   emit();
   clearTimeout(stateWriteTimer);
-  const flush = () => {
-    const items = [...pendingStateWrites.values()];
-    pendingStateWrites.clear();
-    void idb.putStates(items);
-  };
-  if (persistNow) flush();
-  else stateWriteTimer = window.setTimeout(flush, 1000);
+  stateWriteTimer = window.setTimeout(flushStateWrites, STATE_WRITE_DELAY_MS);
   schedulePush();
 }
 
+/** Změní stav epizody a hned ho zapíše do databáze. */
+export function updateEpisodeStateNow(episodeId: string, patch: EpisodeStatePatch) {
+  updateEpisodeState(episodeId, patch);
+  flushStateWrites();
+}
+
 export function markPlayed(episodeId: string, played: boolean) {
-  updateEpisodeState(episodeId, { played, skipped: false, position: 0 }, true);
+  updateEpisodeStateNow(episodeId, { played, skipped: false, position: 0 });
 }
 
 /** „Nechci přehrát“ – epizoda zmizí z nových a nepřehraných i z fronty. */
 export function markSkipped(episodeId: string, skipped: boolean) {
-  updateEpisodeState(episodeId, { skipped, played: false }, true);
+  updateEpisodeStateNow(episodeId, { skipped, played: false });
   if (skipped && state.queue.includes(episodeId)) void removeFromQueue(episodeId);
 }
 
@@ -307,6 +320,9 @@ export const removeFromQueue = (id: string) => setQueue(state.queue.filter((x) =
 // ---------------------------------------------------------------------------
 // Kategorie (vlastní, podcast může být ve více kategoriích)
 
+/** Pseudokategorie pro filtr: podcasty, které nejsou v žádné kategorii. */
+export const NO_CATEGORY = '__none';
+
 async function setCategories(list: Category[]) {
   state.categories = list;
   emit();
@@ -314,7 +330,7 @@ async function setCategories(list: Category[]) {
 }
 
 export async function createCategory(name: string, podcastId?: string): Promise<string> {
-  const id = Math.random().toString(36).slice(2, 10);
+  const id = randomId();
   await setCategories([...state.categories, { id, name: name.trim(), podcastIds: podcastId ? [podcastId] : [] }]);
   return id;
 }
@@ -333,31 +349,31 @@ export function moveCategory(id: string, delta: number) {
   return setCategories(list);
 }
 
-export const togglePodcastCategory = (categoryId: string, podcastId: string) =>
-  setCategories(
-    state.categories.map((c) =>
-      c.id !== categoryId
-        ? c
-        : { ...c, podcastIds: c.podcastIds.includes(podcastId) ? c.podcastIds.filter((x) => x !== podcastId) : [...c.podcastIds, podcastId] },
-    ),
-  );
+const toggled = (ids: string[], id: string) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 
-/** Filtr podle kategorie: null = vše, '__none' = bez kategorie */
+export const togglePodcastCategory = (categoryId: string, podcastId: string) =>
+  setCategories(state.categories.map((c) => (c.id === categoryId ? { ...c, podcastIds: toggled(c.podcastIds, podcastId) } : c)));
+
+/** Filtr podle kategorie: null = vše, NO_CATEGORY = bez kategorie */
 export function inCategory(podcastId: string, categoryId: string | null): boolean {
   if (!categoryId) return true;
-  if (categoryId === '__none') return !state.categories.some((c) => c.podcastIds.includes(podcastId));
+  if (categoryId === NO_CATEGORY) return !state.categories.some((c) => c.podcastIds.includes(podcastId));
   return !!state.categories.find((c) => c.id === categoryId)?.podcastIds.includes(podcastId);
 }
 
+export const categoryNamesFor = (podcastId: string) => state.categories.filter((c) => c.podcastIds.includes(podcastId)).map((c) => c.name);
+
 // ---------------------------------------------------------------------------
-// Nastavení jednotlivých podcastů
+// Nastavení (globální a jednotlivých podcastů)
 
 export const podSettings = (podcastId: string | null | undefined): PodcastSettings => (podcastId && state.podSettings[podcastId]) || {};
 
+/** Výchozí hodnoty (žádná rychlost, 0 s, vypnuto) se neukládají. */
+const withoutDefaults = (ps: PodcastSettings) =>
+  Object.fromEntries(Object.entries(ps).filter(([, v]) => v !== undefined && v !== 0 && v !== false)) as PodcastSettings;
+
 export async function updatePodSettings(podcastId: string, patch: Partial<PodcastSettings>) {
-  const merged = { ...podSettings(podcastId), ...patch };
-  // prázdné hodnoty neukládat
-  for (const k of Object.keys(merged) as (keyof PodcastSettings)[]) if (merged[k] === undefined || merged[k] === 0 || merged[k] === false) delete merged[k];
+  const merged = withoutDefaults({ ...podSettings(podcastId), ...patch });
   const all = { ...state.podSettings };
   if (Object.keys(merged).length) all[podcastId] = merged;
   else delete all[podcastId];
@@ -377,198 +393,4 @@ export async function updateSettings(patch: Partial<Settings>) {
 
 export function rememberNowPlaying(id: string) {
   void writeKv('nowPlaying', id);
-}
-
-// ---------------------------------------------------------------------------
-// Synchronizace se serverem
-
-let pushTimer: number | undefined;
-export function schedulePush(delay = 20000) {
-  clearTimeout(pushTimer);
-  pushTimer = window.setTimeout(() => void push().catch(() => {}), delay);
-}
-
-let pushing: Promise<void> | null = null;
-
-export function push(keepalive = false): Promise<void> {
-  if (!getToken()) return Promise.resolve();
-  pushing ??= doPush(keepalive).finally(() => (pushing = null));
-  return pushing;
-}
-
-async function doPush(keepalive: boolean) {
-  const subs = [...state.podcasts.values()].filter((p) => p.dirty);
-  for (const p of subs) {
-    const body = {
-      id: p.id,
-      feedUrl: p.feedUrl,
-      title: p.title,
-      author: p.author,
-      artworkUrl: p.artworkUrl,
-      source: p.source,
-      appleId: p.appleId,
-      isPrivate: p.isPrivate,
-      addedAt: p.addedAt,
-      deleted: !!p.deleted,
-      updatedAt: p.updatedAt,
-    };
-    await api('/api/subs', { method: 'PUT', body: JSON.stringify(body), keepalive });
-    const cur = state.podcasts.get(p.id);
-    if (cur && cur.updatedAt === p.updatedAt) {
-      const clean = { ...cur, dirty: false };
-      state.podcasts.set(p.id, clean);
-      await idb.putPodcast(clean);
-    }
-  }
-
-  const dirtyStates = [...state.states.values()].filter((s) => s.dirty);
-  if (dirtyStates.length) {
-    const payload = dirtyStates.map(({ dirty: _d, ...s }) => s);
-    await api('/api/state', { method: 'POST', body: JSON.stringify(payload), keepalive });
-    const cleaned: EpisodeState[] = [];
-    for (const s of dirtyStates) {
-      const cur = state.states.get(s.episodeId);
-      if (cur && cur.updatedAt === s.updatedAt) {
-        const c = { ...cur, dirty: false };
-        state.states.set(s.episodeId, c);
-        cleaned.push(c);
-      }
-    }
-    await idb.putStates(cleaned);
-  }
-
-  for (const rec of [...kvMeta.values()].filter((r) => r.dirty)) {
-    await api(`/api/kv/${rec.key}`, { method: 'PUT', body: JSON.stringify({ value: rec.value, updatedAt: rec.updatedAt }), keepalive });
-    const cur = kvMeta.get(rec.key);
-    if (cur && cur.updatedAt === rec.updatedAt) {
-      const c = { ...cur, dirty: false };
-      kvMeta.set(rec.key, c);
-      await idb.putKv(c);
-    }
-  }
-}
-
-interface SyncResponse {
-  now: number;
-  subs: (Omit<Podcast, 'dirty'> & { deleted: boolean })[];
-  states: EpisodeState[];
-  kv: KvRecord[];
-}
-
-export async function sync() {
-  if (!getToken() || state.syncing) return;
-  set({ syncing: true });
-  try {
-    await push();
-    let since = 0;
-    try {
-      since = Number(localStorage.getItem(LAST_SYNC_KEY) ?? 0);
-    } catch {
-      /* ignore */
-    }
-    const data = await apiJson<SyncResponse>(`/api/sync?since=${since}`);
-    const newSubs: Podcast[] = [];
-
-    for (const r of data.subs) {
-      const local = state.podcasts.get(r.id);
-      if (local && local.updatedAt > r.updatedAt) continue;
-      if (r.deleted) {
-        if (local && !local.deleted) {
-          for (const [eid, e] of state.episodes) if (e.podcastId === r.id) state.episodes.delete(eid);
-          state.byPodcast.delete(r.id);
-          await idb.deletePodcastData(r.id);
-        }
-        const tomb: Podcast = { ...(local ?? r), ...r, deleted: true, dirty: false };
-        state.podcasts.set(r.id, tomb);
-        await idb.putPodcast(tomb);
-        continue;
-      }
-      const merged: Podcast = { ...(local ?? {}), ...r, source: r.source === 'apple' ? 'apple' : 'rss', deleted: false, dirty: false };
-      state.podcasts.set(r.id, merged);
-      await idb.putPodcast(merged);
-      if (!local || local.deleted) newSubs.push(merged);
-    }
-
-    const changedStates: EpisodeState[] = [];
-    for (const r of data.states) {
-      const local = state.states.get(r.episodeId);
-      if (local && local.updatedAt >= r.updatedAt) continue;
-      const s = { ...r, dirty: false };
-      state.states.set(r.episodeId, s);
-      changedStates.push(s);
-    }
-    await idb.putStates(changedStates);
-
-    for (const r of data.kv) {
-      const local = kvMeta.get(r.key);
-      if (local && local.updatedAt >= r.updatedAt) continue;
-      const rec = { ...r, dirty: false };
-      if (r.key === 'nowPlaying' && state.playing) {
-        kvMeta.set(r.key, rec);
-      } else {
-        if (r.key === 'nowPlaying') state.currentId = null;
-        applyKv(rec);
-      }
-      await idb.putKv(rec);
-    }
-
-    try {
-      localStorage.setItem(LAST_SYNC_KEY, String(data.now));
-    } catch {
-      /* ignore */
-    }
-    set({ lastSyncAt: Date.now() });
-    // Nové odběry z jiného zařízení – rovnou stáhnout epizody
-    await pool(newSubs, 4, (p) => refreshPodcast(p));
-  } finally {
-    set({ syncing: false });
-  }
-}
-
-/** Odhlášení / změna účtu – smaže lokální data. */
-export async function resetLocal() {
-  await idb.clearAll();
-  try {
-    localStorage.removeItem(LAST_SYNC_KEY);
-  } catch {
-    /* ignore */
-  }
-  kvMeta.clear();
-  set({
-    podcasts: new Map(),
-    episodes: new Map(),
-    byPodcast: new Map(),
-    states: new Map(),
-    queue: [],
-    categories: [],
-    podSettings: {},
-    settings: { ...DEFAULT_SETTINGS },
-    currentId: null,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// OPML
-
-export function exportOpml(): string {
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const lines = activePodcasts().map((p) => `    <outline type="rss" text="${esc(p.title)}" title="${esc(p.title)}" xmlUrl="${esc(p.feedUrl)}" />`);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n  <head><title>Earloft</title></head>\n  <body>\n${lines.join('\n')}\n  </body>\n</opml>\n`;
-}
-
-export async function importOpml(xml: string): Promise<{ added: number; failed: number }> {
-  const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  const urls = [...doc.querySelectorAll('outline[xmlUrl]')].map((o) => o.getAttribute('xmlUrl')!).filter(Boolean);
-  let added = 0;
-  let failed = 0;
-  await pool(urls, 3, async (u) => {
-    try {
-      await subscribe(u);
-      added++;
-    } catch {
-      failed++;
-    }
-  });
-  toast(`Importováno ${added} podcastů${failed ? `, ${failed} se nepodařilo` : ''}`);
-  return { added, failed };
 }

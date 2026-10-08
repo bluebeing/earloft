@@ -1,4 +1,5 @@
-import { kvEntries, writeKv } from './library';
+import { kvEntries, readKv, writeKv } from './kv';
+import { deviceId } from './storage';
 
 /**
  * Evidence poslechu. Každé zařízení zapisuje jen do vlastních klíčů
@@ -7,23 +8,11 @@ import { kvEntries, writeKv } from './library';
  */
 type MonthData = Record<string, Record<string, [number, number]>>;
 
-const DEVICE_KEY = 'podcasty.device';
-
-export function deviceId(): string {
-  try {
-    let id = localStorage.getItem(DEVICE_KEY);
-    if (!id) {
-      id = Math.random().toString(36).slice(2, 10);
-      localStorage.setItem(DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return 'nodevice';
-  }
-}
-
 const pad = (n: number) => String(n).padStart(2, '0');
 const monthKey = (d: Date) => `stats-${deviceId()}-${d.getFullYear()}${pad(d.getMonth() + 1)}`;
+
+const FLUSH_INTERVAL_MS = 30000;
+const roundTenth = (n: number) => Math.round(n * 10) / 10;
 
 let pending = new Map<string, MonthData>();
 let lastFlush = Date.now();
@@ -35,15 +24,14 @@ export function recordListening(podcastId: string, contentSec: number, wallSec: 
   const key = monthKey(now);
   let month = pending.get(key);
   if (!month) {
-    const saved = kvEntries(key).find((r) => r.key === key)?.value as MonthData | undefined;
-    month = structuredClone(saved ?? {});
+    month = structuredClone(readKv<MonthData>(key) ?? {});
     pending.set(key, month);
   }
   const day = (month[pad(now.getDate())] ??= {});
-  const cur = (day[podcastId] ??= [0, 0]);
-  cur[0] = Math.round((cur[0] + contentSec) * 10) / 10;
-  cur[1] = Math.round((cur[1] + wallSec) * 10) / 10;
-  if (Date.now() - lastFlush > 30000) flushStats();
+  const totals = (day[podcastId] ??= [0, 0]);
+  totals[0] = roundTenth(totals[0] + contentSec);
+  totals[1] = roundTenth(totals[1] + wallSec);
+  if (Date.now() - lastFlush > FLUSH_INTERVAL_MS) flushStats();
 }
 
 export function flushStats() {
