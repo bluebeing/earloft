@@ -19,7 +19,22 @@ const stack: string[] = [currentHash()];
 const scrollPos = new Map<string, number>();
 let lastDir: NavDir = 'none';
 
-window.addEventListener('scroll', () => scrollPos.set(currentHash(), window.scrollY), { passive: true });
+/**
+ * Scrolluje jen obsah (<main>), ne celá stránka – na iOS se jinak při setrvačném
+ * scrollu a odskoku na konci utrhává spodní lišta s position: fixed.
+ */
+export const scroller = () => document.querySelector('main');
+export const scrollTop = () => scroller()?.scrollTop ?? 0;
+/** Scroll události nebublají – zachytíme je na dokumentu (capture) a filtrujeme <main>. */
+export function onMainScroll(fn: () => void): () => void {
+  const handler = (e: Event) => {
+    if (e.target === scroller()) fn();
+  };
+  document.addEventListener('scroll', handler, { capture: true, passive: true });
+  return () => document.removeEventListener('scroll', handler, { capture: true });
+}
+
+onMainScroll(() => scrollPos.set(currentHash(), scrollTop()));
 window.addEventListener('hashchange', () => {
   const h = currentHash();
   if (TAB_ROOTS.includes(h)) {
@@ -64,10 +79,9 @@ export function Header({ title, back, actions, large }: { title: string; back?: 
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const threshold = large ? 40 : 150;
-    const on = () => setScrolled(window.scrollY > threshold);
+    const on = () => setScrolled(scrollTop() > threshold);
     on();
-    window.addEventListener('scroll', on, { passive: true });
-    return () => window.removeEventListener('scroll', on);
+    return onMainScroll(on);
   }, [large]);
   return (
     <>

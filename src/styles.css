@@ -73,12 +73,26 @@ select {
   color: inherit;
 }
 
-main {
-  min-height: 100dvh;
-  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 24px);
+/* Kostra: stránka sama nescrolluje, scrolluje jen <main> a spodní lišta je pevná část rozložení */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
 }
-main.has-mini {
-  padding-bottom: calc(var(--tabbar-h) + var(--mini-h) + var(--safe-b) + 24px);
+#app {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding-bottom: 24px;
 }
 
 .screen {
@@ -664,10 +678,8 @@ main.has-mini {
 /* ---------- Spodní lišta + mini přehrávač ---------- */
 
 .bottom-chrome {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex: none;
+  position: relative;
   z-index: 20;
   background: var(--bg-chrome);
   backdrop-filter: saturate(180%) blur(20px);

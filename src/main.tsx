@@ -5,7 +5,7 @@ import { init, refreshAll, sync } from './library';
 import { restoreLastEpisode } from './player';
 import { set, toast, useStore } from './store';
 import { CategoriesPage, CategoryPickerHost } from './ui/categories';
-import { ActionSheetHost, scrollTargetFor, useRoute } from './ui/common';
+import { ActionSheetHost, scrollTargetFor, scroller, useRoute } from './ui/common';
 import { TabCalendar, TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
 import { Overview } from './ui/overview';
 import { MiniPlayer, NowPlaying } from './ui/player-ui';
@@ -88,7 +88,7 @@ function App() {
 
   // Po přechodu: zpět → kde jsi byl, vpřed → nahoru
   useLayoutEffect(() => {
-    window.scrollTo(0, scrollTargetFor(hash, dir));
+    scroller()?.scrollTo(0, scrollTargetFor(hash, dir));
   }, [hash]);
 
   if (!s.ready) return null;
