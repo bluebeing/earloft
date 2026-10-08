@@ -1,0 +1,449 @@
+/* Přehrávač pro počítač a boční panel – na mobilu se nevykreslují */
+.sidebar,
+.desk-player {
+  display: none;
+}
+
+/* =========================================================================
+   Počítač (široká obrazovka): boční panel, větší prvky, víc sloupců
+   ========================================================================= */
+@media (min-width: 900px) {
+  html,
+  body {
+    font-size: 17px;
+  }
+
+  /* Boční panel místo spodních záložek */
+  .tabbar {
+    display: none;
+  }
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 248px;
+    padding: 20px 12px;
+    overflow-y: auto;
+    background: var(--bg-elev);
+    border-right: 0.5px solid var(--sep);
+  }
+  .sb-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px 18px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .sb-brand img {
+    border-radius: 8px;
+  }
+  .sb-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sb-nav a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+    transition: background-color 0.15s ease;
+  }
+  .sb-nav a svg {
+    color: var(--accent);
+  }
+  .sb-nav a:hover {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+  .sb-nav a.on {
+    background: var(--accent);
+    color: #fff;
+  }
+  .sb-nav a.on svg {
+    color: #fff;
+  }
+  .sb-nav a span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sb-heading {
+    margin: 22px 10px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+  .sb-cats .artwork {
+    border-radius: 5px;
+  }
+  .sb-dot {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    background: var(--accent-soft);
+  }
+  .sb-hint {
+    margin-top: auto;
+    padding: 16px 10px 0;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  /* Obsah */
+  .screen {
+    max-width: 1240px;
+    padding: 0 40px;
+  }
+  .topbar {
+    margin: 0 -40px;
+    padding: 14px 40px 10px;
+  }
+  .large-title {
+    font-size: 40px;
+    margin: 4px 0 14px;
+  }
+  .section-title {
+    font-size: 26px;
+    margin-top: 34px;
+  }
+  .chips {
+    margin: 4px -40px 12px;
+    padding: 2px 40px 6px;
+    flex-wrap: wrap;
+  }
+  .cards {
+    margin: 0 -40px;
+    padding: 0 40px 8px;
+    gap: 20px;
+  }
+  .card {
+    flex-basis: 200px;
+  }
+  .card .artwork {
+    width: 200px !important;
+    height: 200px !important;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 28px 24px;
+  }
+  .grid-title {
+    font-size: 15px;
+  }
+
+  /* Seznamy epizod: větší obaly a písmo */
+  .episode-row .artwork {
+    width: 76px !important;
+    height: 76px !important;
+  }
+  .episode-row {
+    padding: 14px 10px;
+    margin: 0 -10px;
+  }
+  .episode-title {
+    font-size: 17px;
+  }
+  .episode-summary {
+    font-size: 15px;
+  }
+  .episode-row:hover,
+  .apple-row:hover {
+    background-color: color-mix(in srgb, var(--text) 5%, transparent);
+  }
+  .grid-item .artwork,
+  .card .artwork {
+    transition: box-shadow 0.2s ease;
+  }
+  .grid-item:hover .artwork,
+  .card:hover .artwork {
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  }
+  .search-box input {
+    height: 44px;
+    max-width: 640px;
+  }
+
+  /* Detail podcastu a epizody: obal vlevo, informace vpravo */
+  .podcast-hero,
+  .episode-hero {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 32px;
+    align-items: start;
+    justify-items: start;
+    text-align: left;
+    padding: 12px 0 16px;
+  }
+  .podcast-hero > .artwork:first-child,
+  .episode-hero > .artwork:first-child {
+    grid-row: 1 / span 8;
+    width: 260px !important;
+    height: 260px !important;
+  }
+  .episode-hero > .artwork:first-child {
+    width: 200px !important;
+    height: 200px !important;
+  }
+  .podcast-hero h1 {
+    font-size: 34px;
+    margin-top: 8px;
+  }
+  .episode-hero h1 {
+    font-size: 28px;
+  }
+  .episode-hero .episode-meta {
+    margin-top: 8px;
+  }
+  .hero-buttons {
+    justify-content: flex-start;
+  }
+  .hero-desc {
+    max-width: 760px;
+    -webkit-line-clamp: 5;
+  }
+  .segmented:not(.top) {
+    max-width: 420px;
+  }
+  .segmented.top {
+    max-width: 360px;
+  }
+  .notes {
+    max-width: 780px;
+    font-size: 17px;
+  }
+
+  /* Kalendář vedle vybraného dne */
+  .cal-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 40px;
+    align-items: start;
+  }
+  .cal-side {
+    position: sticky;
+    top: 72px;
+  }
+  .cal-side .cal-day-title {
+    margin-top: 6px;
+  }
+  .cal-cell {
+    min-height: 84px;
+  }
+  .cal-cell:hover:not(.selected) {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+  }
+  .cal-arts .artwork {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  /* Statistiky */
+  .stat-hero-value {
+    font-size: 52px;
+  }
+  .bars {
+    height: 240px;
+  }
+  .bar-label {
+    font-size: 11px;
+  }
+  .stat-tiles {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .top-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 32px;
+  }
+  .top-list > * + * {
+    border-top: 0;
+  }
+
+  /* Nastavení a formuláře v rozumné šířce */
+  .form-group,
+  .hint {
+    max-width: 680px;
+  }
+
+  /* Spodní přehrávač přes celou šířku */
+  .bottom-chrome {
+    padding-bottom: 0;
+  }
+  .desk-player {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 560px) minmax(0, 1fr);
+    align-items: center;
+    gap: 24px;
+    height: 84px;
+    padding: 0 20px;
+    animation: mini-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .dp-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+  .dp-art {
+    border-radius: 8px;
+    transition: transform 0.15s ease;
+  }
+  .dp-art:hover {
+    transform: scale(1.05);
+  }
+  .dp-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .dp-title {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dp-sub {
+    color: var(--text-2);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dp-title:hover,
+  .dp-sub:hover {
+    text-decoration: underline;
+  }
+  .dp-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .dp-controls {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .dp-controls .icon-btn {
+    color: var(--text);
+  }
+  .dp-controls .dp-play {
+    min-width: 40px;
+    min-height: 40px;
+    background: var(--text);
+    color: var(--bg);
+  }
+  .dp-controls .dp-play:hover {
+    background: var(--text);
+    opacity: 0.85;
+  }
+  .dp-scrubber {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .dp-scrubber span {
+    min-width: 46px;
+  }
+  .dp-scrubber span:first-child {
+    text-align: right;
+  }
+  .dp-scrubber input[type='range'] {
+    flex: 1;
+    height: 16px;
+  }
+  .dp-scrubber input[type='range']::-webkit-slider-runnable-track {
+    height: 4px;
+  }
+  .dp-scrubber input[type='range']::-webkit-slider-thumb {
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
+  }
+  .dp-scrubber:hover input[type='range']::-webkit-slider-thumb {
+    opacity: 1;
+  }
+  .dp-extras {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Velký přehrávač a nabídky jako okna uprostřed */
+  .np-inner {
+    max-width: 520px;
+  }
+  .sheet-backdrop {
+    align-items: center;
+  }
+  .action-sheet {
+    padding-bottom: 0;
+    animation: pop-in 0.22s cubic-bezier(0.2, 0.9, 0.25, 1);
+  }
+  .sheet-backdrop.closing .action-sheet {
+    animation: fade-out 0.18s ease forwards;
+  }
+  .action {
+    font-size: 17px;
+    height: 50px;
+  }
+  .toast {
+    bottom: 110px;
+  }
+
+  /* Myš: kurzor a hover */
+  button,
+  a,
+  .episode-row,
+  .apple-row,
+  .cal-cell {
+    cursor: pointer;
+  }
+  .btn:hover,
+  .chip:hover,
+  .pill-btn:hover,
+  .play-pill:hover {
+    filter: brightness(1.1);
+  }
+  .icon-btn:hover {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+  }
+}
+
+/* Velmi široké displeje: seznamy epizod ve dvou sloupcích */
+@media (min-width: 1500px) {
+  .screen > section > .list,
+  .screen > .list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 36px;
+  }
+  .screen > section > .list > * + *,
+  .screen > .list > * + * {
+    border-top: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}

@@ -2,16 +2,17 @@ import { render } from 'preact';
 import { useEffect, useLayoutEffect } from 'preact/hooks';
 import { registerSW } from 'virtual:pwa-register';
 import { init, refreshAll, sync } from './library';
-import { restoreLastEpisode } from './player';
-import { set, toast, useStore } from './store';
+import { restoreLastEpisode, skipBack, skipForward, togglePlay } from './player';
+import { set, state, toast, useStore } from './store';
 import { CategoriesPage, CategoryPickerHost } from './ui/categories';
-import { ActionSheetHost, scrollTargetFor, scroller, useRoute } from './ui/common';
+import { ActionSheetHost, Artwork, scrollTargetFor, scroller, useIsDesktop, useRoute } from './ui/common';
 import { TabCalendar, TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
 import { Overview } from './ui/overview';
-import { MiniPlayer, NowPlaying } from './ui/player-ui';
+import { DesktopPlayer, MiniPlayer, NowPlaying } from './ui/player-ui';
 import { EpisodePage, Library, ListenNow, NotFound, PodcastPage, Search } from './ui/screens';
 import { Login, Settings } from './ui/settings';
 import './styles.css';
+import './desktop.css';
 
 registerSW({ immediate: true });
 
@@ -29,7 +30,7 @@ function Screen({ route }: { route: string[] }) {
     case '':
       return <ListenNow />;
     case 'library':
-      return <Library />;
+      return <Library catParam={id} />;
     case 'search':
       return <Search />;
     case 'overview':
@@ -50,9 +51,80 @@ function Screen({ route }: { route: string[] }) {
 /** Ke které záložce patří aktuální stránka (detail se zvýrazní pod posledně použitou). */
 let lastTab = '';
 
+/** Boční panel na počítači: navigace + rychlý přístup ke kategoriím. */
+function Sidebar() {
+  const s = useStore();
+  let libCat: string | null = null;
+  try {
+    libCat = localStorage.getItem('podcasty.cat.library');
+  } catch {
+    /* ignore */
+  }
+  const activeCat = lastTab === 'library' ? (libCat ?? s.categories[0]?.id) : null;
+  return (
+    <aside class="sidebar">
+      <div class="sb-brand">
+        <img src="/icon-192.png" width={30} height={30} alt="" />
+        <span>Podcasty</span>
+      </div>
+      <nav class="sb-nav">
+        {TABS.map(({ path, label, Icon }) => (
+          <a href={`#/${path}`} class={lastTab === path ? 'on' : ''}>
+            <Icon size={20} />
+            <span>{label}</span>
+          </a>
+        ))}
+      </nav>
+      {s.categories.length > 0 && (
+        <>
+          <div class="sb-heading">Kategorie</div>
+          <nav class="sb-nav sb-cats">
+            {[...s.categories, { id: '__none', name: 'Bez kategorie', podcastIds: [] }].map((c) => {
+              const first = c.podcastIds.map((id) => s.podcasts.get(id)).find((p) => p && !p.deleted);
+              return (
+                <a href={`#/library/${c.id}`} class={activeCat === c.id ? 'on' : ''}>
+                  {first ? <Artwork src={first.artworkUrl} size={20} /> : <span class="sb-dot" />}
+                  <span>{c.name}</span>
+                </a>
+              );
+            })}
+          </nav>
+        </>
+      )}
+      <div class="sb-hint">Mezerník přehrát/pauza · ← → posun</div>
+    </aside>
+  );
+}
+
+/** Klávesové zkratky (hlavně pro počítač). */
+function useShortcuts() {
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      const t = e.target;
+      if ((t instanceof Element && t.closest('input, textarea, select, [contenteditable]')) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape' && state.nowPlayingOpen) return set({ nowPlayingOpen: false });
+      if (!state.currentId) return;
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        skipBack();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        skipForward();
+      }
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+}
+
 function App() {
   const s = useStore();
   const { route, hash, dir } = useRoute();
+  const desktop = useIsDesktop();
+  useShortcuts();
 
   useEffect(() => {
     const onUnauthorized = () => set({ authed: false });
@@ -99,13 +171,16 @@ function App() {
 
   return (
     <>
-      <main class={s.currentId ? 'has-mini' : ''}>
-        <div class={`page page-${dir}`} key={hash}>
-          <Screen route={route} />
-        </div>
-      </main>
+      <div class="shell">
+        {desktop && <Sidebar />}
+        <main class={s.currentId ? 'has-mini' : ''}>
+          <div class={`page page-${dir}`} key={hash}>
+            <Screen route={route} />
+          </div>
+        </main>
+      </div>
       <div class="bottom-chrome">
-        <MiniPlayer />
+        {desktop ? <DesktopPlayer /> : <MiniPlayer />}
         <nav class="tabbar">
           {TABS.map(({ path, label, Icon }) => (
             <a href={`#/${path}`} class={lastTab === path ? 'on' : ''}>

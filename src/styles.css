@@ -85,8 +85,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+.shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 main {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;

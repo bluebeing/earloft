@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { activePodcasts, createCategory, deleteCategory, moveCategory, renameCategory, togglePodcastCategory } from '../library';
-import { state, useStore } from '../store';
+import { emit, state, useStore } from '../store';
 import { Header, useDismiss } from './common';
 import { CheckIcon, PlusIcon } from './icons';
 
@@ -25,6 +25,7 @@ export function useCategoryFilter(key: string): [string | null, (v: string | nul
     } catch {
       /* ignore */
     }
+    emit(); // boční panel zvýrazní zvolenou kategorii
   };
   return [valid, set];
 }

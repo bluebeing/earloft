@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import DOMPurify from 'dompurify';
 import {
   activePodcasts,
@@ -129,9 +129,13 @@ function ContinueCard({ ep }: { ep: Episode }) {
 // ---------------------------------------------------------------------------
 // Knihovna
 
-export function Library() {
+export function Library({ catParam }: { catParam?: string }) {
   const s = useStore();
   const [chosen, setCat] = useCategoryFilter('library');
+  // Kategorie z bočního panelu (#/library/<id>)
+  useLayoutEffect(() => {
+    if (catParam && catParam !== chosen) setCat(catParam);
+  }, [catParam]);
   // Knihovna nemá „Vše“ – bez volby se ukáže první kategorie
   const cat = chosen ?? s.categories[0]?.id ?? null;
   const all = activePodcasts();

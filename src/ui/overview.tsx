@@ -103,6 +103,8 @@ function Calendar() {
   return (
     <>
       <CategoryChips value={cat} onChange={setCat} />
+      <div class="cal-layout">
+        <div class="cal-main">
       <div class="cal-head">
         <button class="icon-btn" onClick={() => shift(-1)} aria-label="Předchozí měsíc">
           <BackIcon size={20} />
@@ -159,6 +161,8 @@ function Calendar() {
         })}
       </div>
 
+        </div>
+        <div class="cal-side">
       <h2 class="section-title cal-day-title">{dayTitleFmt.format(new Date(sy, sm - 1, sd))}</h2>
       {selectedEps.length ? (
         <div class="list fade-swap" key={selected}>
@@ -169,6 +173,8 @@ function Calendar() {
       ) : (
         <p class="muted cal-none">Tento den nic nevyšlo.</p>
       )}
+        </div>
+      </div>
     </>
   );
 }

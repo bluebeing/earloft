@@ -149,3 +149,91 @@ export function NowPlaying() {
     </div>
   );
 }
+
+/** Spodní přehrávač pro počítač: info vlevo, ovládání + posuvník uprostřed, doplňky vpravo. */
+export function DesktopPlayer() {
+  const s = useStore();
+  useTick();
+  const [scrub, setScrub] = useState<number | null>(null);
+  const ep = s.currentId ? s.episodes.get(s.currentId) : null;
+  if (!ep) return null;
+  const pod = getPodcast(ep.podcastId);
+  const dur = s.duration || ep.duration || 0;
+  const pos = scrub ?? s.position;
+  const nextRate = () => {
+    const i = RATES.indexOf(s.settings.rate);
+    setRate(RATES[(i + 1) % RATES.length] ?? 1);
+  };
+  const sleepMenu = () =>
+    showActions('Časovač vypnutí', [
+      ...[5, 15, 30, 45, 60].map((m) => ({ label: `${m} minut`, onClick: () => setSleepTimer(m) })),
+      { label: 'Na konci epizody', onClick: () => setSleepTimer('end') },
+      ...(s.sleepAt || s.sleepAtEnd ? [{ label: 'Vypnout časovač', destructive: true, onClick: () => setSleepTimer(null) }] : []),
+    ]);
+  const sleepOn = !!(s.sleepAt || s.sleepAtEnd);
+
+  return (
+    <div class="desk-player">
+      <div class="dp-info">
+        <button class="dp-art" onClick={() => set({ nowPlayingOpen: true })} aria-label="Otevřít přehrávač">
+          <Artwork src={ep.artworkUrl || pod?.artworkUrl} size={56} />
+        </button>
+        <div class="dp-text">
+          <a class="dp-title" href={`#/episode/${ep.id}`} title={ep.title}>
+            {ep.title}
+          </a>
+          {pod && (
+            <a class="dp-sub" href={`#/podcast/${pod.id}`}>
+              {pod.title}
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div class="dp-center">
+        <div class="dp-controls">
+          <button class="icon-btn" onClick={skipBack} aria-label={`Zpět o ${s.settings.skipBack} s`} title="Zpět (←)">
+            <SkipIcon seconds={s.settings.skipBack} size={30} />
+          </button>
+          <button class="icon-btn dp-play" onClick={togglePlay} aria-label={s.playing ? 'Pozastavit' : 'Přehrát'} title="Přehrát / pozastavit (mezerník)">
+            {s.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
+          </button>
+          <button class="icon-btn" onClick={skipForward} aria-label={`Vpřed o ${s.settings.skipForward} s`} title="Vpřed (→)">
+            <SkipIcon seconds={s.settings.skipForward} forward size={30} />
+          </button>
+        </div>
+        <div class="dp-scrubber np-scrubber">
+          <span>{formatClock(pos)}</span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, Math.floor(dur))}
+            step={1}
+            value={Math.floor(pos)}
+            onInput={(e) => setScrub(Number((e.target as HTMLInputElement).value))}
+            onChange={(e) => {
+              seekTo(Number((e.target as HTMLInputElement).value));
+              setScrub(null);
+            }}
+            class={scrub !== null ? 'scrubbing' : ''}
+            style={{ '--pct': `${dur ? (pos / dur) * 100 : 0}%` }}
+            aria-label="Pozice v epizodě"
+          />
+          <span>{dur ? `-${formatClock(dur - pos)}` : '--:--'}</span>
+        </div>
+      </div>
+
+      <div class="dp-extras">
+        <button class="pill-btn" onClick={nextRate} title="Rychlost přehrávání">
+          {s.settings.rate}×
+        </button>
+        <button class={`pill-btn${sleepOn ? ' on' : ''}`} onClick={sleepMenu} title="Časovač vypnutí">
+          <MoonIcon size={14} />
+        </button>
+        <button class="icon-btn" onClick={() => set({ nowPlayingOpen: true })} title="Celá obrazovka" aria-label="Otevřít přehrávač">
+          <ChevronDownIcon size={22} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}

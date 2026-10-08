@@ -37,7 +37,7 @@ export function onMainScroll(fn: () => void): () => void {
 onMainScroll(() => scrollPos.set(currentHash(), scrollTop()));
 window.addEventListener('hashchange', () => {
   const h = currentHash();
-  if (TAB_ROOTS.includes(h)) {
+  if (TAB_ROOTS.includes(h) || h.startsWith('#/library/')) {
     stack.length = 0;
     stack.push(h);
     lastDir = 'tab';
@@ -349,4 +349,18 @@ export function Empty({ title, children }: { title: string; children?: Component
 
 export function Spinner() {
   return <div class="spinner" aria-label="Načítám" />;
+}
+
+const DESKTOP_QUERY = '(min-width: 900px)';
+
+/** Široká obrazovka (počítač) – rozložení s bočním panelem. */
+export function useIsDesktop(): boolean {
+  const [desk, setDesk] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    const on = () => setDesk(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return desk;
 }
