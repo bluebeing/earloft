@@ -76,3 +76,7 @@ Appka poběží na `https://podcasty.<tvoje-subdoména>.workers.dev`. Při aktua
 | `src/ui/` | obrazovky a komponenty |
 | `src/styles.css`, `src/desktop.css` | vzhled (mobil, počítač) |
 | `scripts/make-icons.mjs` | generátor PNG ikon |
+
+## Licence
+
+[MIT](LICENSE)

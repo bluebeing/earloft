@@ -30,5 +30,6 @@
   },
   "overrides": {
     "sharp": "^0.35.5"
-  }
+  },
+  "license": "MIT"
 }
