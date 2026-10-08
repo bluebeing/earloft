@@ -89,7 +89,7 @@ export function Settings() {
           Odhlásit toto zařízení
         </button>
       </div>
-      <p class="hint center">Posluchárna · {__APP_VERSION__}</p>
+      <p class="hint center">Earloft · {__APP_VERSION__}</p>
     </div>
   );
 }
@@ -119,7 +119,7 @@ export function Login() {
   return (
     <div class="login">
       <img src="/icon-192.png" width={96} height={96} alt="" class="login-icon" />
-      <h1>Posluchárna</h1>
+      <h1>Earloft</h1>
       <p>Zadej přístupový token (APP_TOKEN z Cloudflare).</p>
       <form onSubmit={submit}>
         <input

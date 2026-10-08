@@ -14,8 +14,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Posluchárna',
-        short_name: 'Posluchárna',
+        name: 'Earloft',
+        short_name: 'Earloft',
         description: 'Vlastní podcastový přehrávač pro soukromé RSS feedy i Apple Podcasts',
         lang: 'cs',
         start_url: '/',

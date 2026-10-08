@@ -522,7 +522,7 @@ export async function resetLocal() {
 export function exportOpml(): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const lines = activePodcasts().map((p) => `    <outline type="rss" text="${esc(p.title)}" title="${esc(p.title)}" xmlUrl="${esc(p.feedUrl)}" />`);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n  <head><title>Posluchárna</title></head>\n  <body>\n${lines.join('\n')}\n  </body>\n</opml>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n  <head><title>Earloft</title></head>\n  <body>\n${lines.join('\n')}\n  </body>\n</opml>\n`;
 }
 
 export async function importOpml(xml: string): Promise<{ added: number; failed: number }> {

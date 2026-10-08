@@ -1,4 +1,4 @@
-# Posluchárna
+# Earloft
 
 Osobní podcastový přehrávač jako PWA, vzhledem podobný Apple Podcasts. Hraje **soukromé RSS feedy placených podcastů** (Herohero, Forendors, Patreon, Supercast…) i **bezplatné podcasty z Apple Podcasts**. Odběry, rozposlouchané pozice, fronta, kategorie a statistiky se synchronizují mezi zařízeními. Běží zdarma na Cloudflare Workers + D1 a je určený pro jednoho uživatele: každý si nasazuje vlastní instanci.
 
