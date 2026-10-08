@@ -3,7 +3,7 @@ import { api, apiJson, getToken } from './api';
 import * as idb from './db';
 import { parseFeed, type ParsedFeed } from './feed';
 import { DEFAULT_SETTINGS, emit, indexEpisodes, rebuildIndex, set, state, toast } from './store';
-import type { ApplePodcast, Category, Episode, EpisodeState, KvRecord, Podcast, Settings } from './types';
+import type { ApplePodcast, Category, Episode, EpisodeState, KvRecord, Podcast, PodcastSettings, Settings } from './types';
 import { hashId, looksPrivate, podcastIdFor, pool } from './util';
 
 const kvMeta = new Map<string, KvRecord>();
@@ -33,6 +33,7 @@ function applyKv(rec: KvRecord) {
   kvMeta.set(rec.key, rec);
   if (rec.key === 'queue' && Array.isArray(rec.value)) state.queue = rec.value as string[];
   if (rec.key === 'categories' && Array.isArray(rec.value)) state.categories = rec.value as Category[];
+  if (rec.key === 'podcastSettings' && rec.value && typeof rec.value === 'object') state.podSettings = rec.value as Record<string, PodcastSettings>;
   if (rec.key === 'settings' && rec.value) state.settings = { ...DEFAULT_SETTINGS, ...(rec.value as Settings) };
   if (rec.key === 'nowPlaying' && typeof rec.value === 'string' && !state.currentId) state.currentId = rec.value;
 }
@@ -58,6 +59,9 @@ interface FetchResult {
   contentHash?: string;
 }
 
+/** Zvýšit při změně parseru – vynutí nové zpracování všech feedů. */
+const PARSER_VERSION = 2;
+
 /** Pustí prohlížeč ke slovu (vykreslení, dotyk) před náročnou prací. */
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -71,7 +75,7 @@ async function fetchFeed(feedUrl: string, podcastId: string, cond?: Podcast): Pr
   if (res.status === 304) return { notModified: true, etag, lastModified, contentHash: cond?.contentHash };
   const text = await res.text();
   // Mnoho serverů ETag nepodporuje – feed beze změny poznáme podle otisku a nemusíme ho parsovat
-  const contentHash = `${text.length}:${hashId(text)}`;
+  const contentHash = `${PARSER_VERSION}:${text.length}:${hashId(text)}`;
   if (cond?.contentHash === contentHash) return { notModified: true, etag, lastModified, contentHash };
   await yieldToMain();
   const parsed = parseFeed(text, podcastId);
@@ -98,8 +102,14 @@ export async function refreshPodcast(p: Podcast, force = false) {
       next.title = r.parsed.title || next.title;
       next.author = r.parsed.author ?? next.author;
       next.artworkUrl = r.parsed.artworkUrl ?? next.artworkUrl;
+      const prevIds = new Set((state.byPodcast.get(p.id) ?? []).map((e) => e.id));
       storeEpisodes(p.id, r.parsed.episodes);
       await idb.replaceEpisodes(p.id, r.parsed.episodes, r.parsed.notes);
+      if (prevIds.size && state.podSettings[p.id]?.autoQueue) {
+        const weekAgo = Date.now() - 7 * 86400000;
+        const fresh = r.parsed.episodes.filter((e) => !prevIds.has(e.id) && e.pubDate > weekAgo && !state.queue.includes(e.id));
+        if (fresh.length) await setQueue([...state.queue, ...fresh.reverse().map((e) => e.id)]);
+      }
     }
     state.podcasts.set(p.id, next);
     await idb.putPodcast(next);
@@ -339,6 +349,26 @@ export function inCategory(podcastId: string, categoryId: string | null): boolea
   return !!state.categories.find((c) => c.id === categoryId)?.podcastIds.includes(podcastId);
 }
 
+// ---------------------------------------------------------------------------
+// Nastavení jednotlivých podcastů
+
+export const podSettings = (podcastId: string | null | undefined): PodcastSettings => (podcastId && state.podSettings[podcastId]) || {};
+
+export async function updatePodSettings(podcastId: string, patch: Partial<PodcastSettings>) {
+  const merged = { ...podSettings(podcastId), ...patch };
+  // prázdné hodnoty neukládat
+  for (const k of Object.keys(merged) as (keyof PodcastSettings)[]) if (merged[k] === undefined || merged[k] === 0 || merged[k] === false) delete merged[k];
+  const all = { ...state.podSettings };
+  if (Object.keys(merged).length) all[podcastId] = merged;
+  else delete all[podcastId];
+  state.podSettings = all;
+  emit();
+  await writeKv('podcastSettings', all);
+}
+
+/** Rychlost pro daný podcast (vlastní, jinak globální). */
+export const rateFor = (podcastId: string | null | undefined) => podSettings(podcastId).rate ?? state.settings.rate;
+
 export async function updateSettings(patch: Partial<Settings>) {
   state.settings = { ...state.settings, ...patch };
   emit();
@@ -511,6 +541,7 @@ export async function resetLocal() {
     states: new Map(),
     queue: [],
     categories: [],
+    podSettings: {},
     settings: { ...DEFAULT_SETTINGS },
     currentId: null,
   });

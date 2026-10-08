@@ -788,7 +788,7 @@ main {
 .np-art {
   /* Pevná velikost (nezvětšuje se při přehrávání) a omezená výškou displeje,
      aby se ovládání, rychlost i poznámky vešly bez scrollování */
-  width: min(100%, max(160px, calc(100dvh - 470px - var(--safe-t) - var(--safe-b))));
+  width: min(100%, max(160px, calc(100dvh - 520px - var(--safe-t) - var(--safe-b))));
   margin: 12px auto 0;
 }
 .np-art .artwork {

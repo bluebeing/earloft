@@ -70,6 +70,10 @@ export function parseFeed(xml: string, podcastId: string): ParsedFeed {
       season: int(text(item, 'itunes:season')),
       episode: int(text(item, 'itunes:episode')),
       link: text(item, 'link') || null,
+      chaptersUrl: kid(item, 'podcast:chapters')?.getAttribute('url') ?? null,
+      transcripts: kids(item, 'podcast:transcript')
+        .map((t) => ({ url: t.getAttribute('url') ?? '', type: (t.getAttribute('type') ?? '').toLowerCase() }))
+        .filter((t) => t.url),
     });
     if (html) notes.set(id, html);
   }

@@ -8,11 +8,13 @@ import { CategoriesPage, CategoryPickerHost } from './ui/categories';
 import { ActionSheetHost, Artwork, scrollTargetFor, scroller, useIsDesktop, useRoute } from './ui/common';
 import { TabCalendar, TabLibrary, TabListen, TabSearch, TabSettings } from './ui/icons';
 import { Overview } from './ui/overview';
+import { PodcastSettingsPage, TranscriptPage, bookmarkHere } from './ui/extras';
 import { DesktopPlayer, MiniPlayer, NowPlaying } from './ui/player-ui';
 import { EpisodePage, Library, ListenNow, NotFound, PodcastPage, Search } from './ui/screens';
 import { Login, Settings } from './ui/settings';
 import './styles.css';
 import './desktop.css';
+import './extras.css';
 
 registerSW({ immediate: true });
 
@@ -41,6 +43,10 @@ function Screen({ route }: { route: string[] }) {
       return <PodcastPage id={id} key={id} />;
     case 'categories':
       return <CategoriesPage />;
+    case 'transcript':
+      return <TranscriptPage id={id} key={id} />;
+    case 'podcast-settings':
+      return <PodcastSettingsPage id={id} key={id} />;
     case 'episode':
       return <EpisodePage id={id} key={id} />;
     default:
@@ -91,7 +97,7 @@ function Sidebar() {
           </nav>
         </>
       )}
-      <div class="sb-hint">Mezerník přehrát/pauza · ← → posun</div>
+      <div class="sb-hint">Mezerník přehrát/pauza · ← → posun · B záložka</div>
     </aside>
   );
 }
@@ -113,6 +119,8 @@ function useShortcuts() {
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         skipForward();
+      } else if (e.key === 'b' || e.key === 'B') {
+        bookmarkHere();
       }
     };
     window.addEventListener('keydown', on);

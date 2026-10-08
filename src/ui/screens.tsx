@@ -10,6 +10,7 @@ import {
   inCategory,
   isDone,
   isSubscribed,
+  podSettings,
   markPlayed,
   previewFeed,
   refreshAll,
@@ -26,6 +27,10 @@ import type { ApplePodcast, Episode } from '../types';
 import { appleIdFromUrl, formatDate, formatDuration, safeHttpUrl } from '../util';
 import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, goBack, showActions } from './common';
 import { CategoryChips, categoryNamesFor, pickCategories, useCategoryFilter } from './categories';
+import { ChapterList, EpisodeBookmarks } from './extras';
+import { hasTranscript } from '../media';
+import { BookmarkIcon, TextIcon } from './icons';
+import { addBookmark } from '../bookmarks';
 import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from './icons';
 
 // ---------------------------------------------------------------------------
@@ -212,6 +217,7 @@ export function PodcastPage({ id }: { id: string }) {
 
   const menu = () =>
     showActions(pod.title, [
+      { label: 'Nastavení podcastu…', onClick: () => go(`/podcast-settings/${pod.id}`) },
       { label: 'Kategorie…', onClick: () => pickCategories(pod.id) },
       { label: 'Obnovit feed', onClick: () => void refreshPodcast(pod, true).then(() => toast('Obnoveno')) },
       { label: pod.isPrivate ? 'Označit jako veřejný' : 'Označit jako soukromý', onClick: () => void setPodcastPrivate(pod.id, !pod.isPrivate) },
@@ -267,9 +273,14 @@ export function PodcastPage({ id }: { id: string }) {
           )}
         </div>
         {subscribed && (
-          <button class="chip category-chip" onClick={() => pickCategories(pod.id)}>
-            {categoryNamesFor(pod.id).join(' · ') || '+ Přidat do kategorie'}
-          </button>
+          <div class="hero-chips">
+            <button class="chip category-chip" onClick={() => pickCategories(pod.id)}>
+              {categoryNamesFor(pod.id).join(' · ') || '+ Přidat do kategorie'}
+            </button>
+            <a class="chip category-chip" href={`#/podcast-settings/${pod.id}`}>
+              {podSettingsSummary(pod.id) || 'Nastavení'}
+            </a>
+          </div>
         )}
         {pod.fetchError && <div class="error-box">Poslední obnovení selhalo: {pod.fetchError}</div>}
         {pod.description && (
@@ -301,6 +312,17 @@ export function PodcastPage({ id }: { id: string }) {
       {eps.length === 0 && <Empty title="Žádné epizody" />}
     </div>
   );
+}
+
+/** Krátký popis vlastního nastavení podcastu pro čip v detailu. */
+function podSettingsSummary(id: string): string {
+  const ps = podSettings(id);
+  const parts: string[] = [];
+  if (ps.rate) parts.push(`${ps.rate}×`);
+  if (ps.skipIntro) parts.push(`úvod −${ps.skipIntro} s`);
+  if (ps.skipOutro) parts.push(`závěr −${ps.skipOutro} s`);
+  if (ps.autoQueue) parts.push('do fronty');
+  return parts.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -401,8 +423,21 @@ export function EpisodePage({ id }: { id: string }) {
         )}
         <div class="hero-buttons">
           <PlayPill ep={ep} />
+          {hasTranscript(ep) && (
+            <a class="pill-btn" href={`#/transcript/${ep.id}`}>
+              <TextIcon size={14} /> Přepis
+            </a>
+          )}
+          {s.currentId === ep.id && (
+            <button class="pill-btn" onClick={() => void addBookmark(ep.id, s.position)}>
+              <BookmarkIcon size={14} /> Záložka
+            </button>
+          )}
         </div>
       </div>
+      <ChapterList ep={ep} />
+      <EpisodeBookmarks ep={ep} />
+      <h2 class="section-title notes-title">Poznámky</h2>
       <div class="notes" ref={ref} onClick={onNotesClick}>
         {notes === null ? <Spinner /> : notes ? <div dangerouslySetInnerHTML={{ __html: notes }} /> : <p class="muted">Bez popisu.</p>}
       </div>

@@ -70,3 +70,14 @@ export const TabSettings = svg(
 export const TabCalendar = svg(
   <path d="M7 2.5a1 1 0 0 1 1 1V4h8v-.5a1 1 0 1 1 2 0V4h.5A2.5 2.5 0 0 1 21 6.5v12a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-12A2.5 2.5 0 0 1 5.5 4H6v-.5a1 1 0 0 1 1-1zM5 9v9.5a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9H5zm2.5 2.5h3v3h-3v-3zm5 0h3v3h-3v-3z" />,
 );
+export const ListIcon = svg(
+  <path d="M4 6.5h1.5M9 6.5h11M4 12h1.5M9 12h11M4 17.5h1.5M9 17.5h11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />,
+);
+export const TextIcon = svg(
+  <path d="M5 5.5h14M5 10h14M5 14.5h9M5 19h11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />,
+);
+export const BookmarkIcon = svg(<path d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5v16.1a.6.6 0 0 1-.95.49L12 16.8l-6.05 4.29A.6.6 0 0 1 5 20.6V4.5A1.5 1.5 0 0 1 6.5 3z" />);
+export const TrashIcon = svg(
+  <path d="M4.5 6.5h15M9.5 6.5V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3v1.7M6.5 6.5l.8 12.6c.1 1 .9 1.9 2 1.9h5.4c1 0 1.9-.9 2-1.9l.8-12.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />,
+);
+export const GearIcon = TabSettings;

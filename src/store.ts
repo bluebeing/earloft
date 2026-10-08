@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from 'preact/hooks';
-import type { Category, Episode, EpisodeState, Podcast, Settings } from './types';
+import type { Category, Episode, EpisodeState, Podcast, PodcastSettings, Settings } from './types';
 
 export interface AppState {
   ready: boolean;
@@ -11,6 +11,7 @@ export interface AppState {
   states: Map<string, EpisodeState>;
   queue: string[];
   categories: Category[];
+  podSettings: Record<string, PodcastSettings>;
   settings: Settings;
   refreshing: boolean;
   syncing: boolean;
@@ -38,6 +39,7 @@ export const state: AppState = {
   states: new Map(),
   queue: [],
   categories: [],
+  podSettings: {},
   settings: { ...DEFAULT_SETTINGS },
   refreshing: false,
   syncing: false,

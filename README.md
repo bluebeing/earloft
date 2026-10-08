@@ -8,6 +8,10 @@ Osobní podcastový přehrávač jako PWA, vzhledem podobný Apple Podcasts. Hra
 - **Poslouchat:** pokračovat v poslechu, fronta (Up Next) a nové epizody s filtrem podle kategorií.
 - **Knihovna** s vlastními kategoriemi. Podcast může být ve více kategoriích.
 - **Epizody:** lze je označit jako přehrané nebo jako „Nechci přehrát“. Časové značky v poznámkách jsou klikací.
+- **Kapitoly** (Podcasting 2.0 `podcast:chapters` nebo časové značky v poznámkách): seznam, aktuální kapitola v přehrávači i na lock screenu.
+- **Přepisy** (`podcast:transcript` – WebVTT, SRT, JSON, HTML): zvýraznění právě čtené pasáže, ťuknutím skok na místo.
+- **Záložky** s poznámkou (v přehrávači nebo klávesou B), synchronizace mezi zařízeními, export do Markdownu.
+- **Nastavení pro každý podcast:** vlastní rychlost, přeskočení úvodu/závěru, nové díly automaticky do fronty.
 - **Přehrávač:**
   - posun ±15/30 s, rychlost 0.8–2× a časovač vypnutí;
   - ovládání z lock screenu, AirPods i CarPlay (Media Session API);

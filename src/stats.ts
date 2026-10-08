@@ -9,7 +9,7 @@ type MonthData = Record<string, Record<string, [number, number]>>;
 
 const DEVICE_KEY = 'podcasty.device';
 
-function deviceId(): string {
+export function deviceId(): string {
   try {
     let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {

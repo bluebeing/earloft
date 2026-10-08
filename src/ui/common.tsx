@@ -364,3 +364,13 @@ export function useIsDesktop(): boolean {
   }, []);
   return desk;
 }
+
+/** „Nenalezeno“ bez závislosti na obrazovkách (pro pomocné stránky) */
+export function NotFoundInline() {
+  return (
+    <div class="screen">
+      <Header title="" back />
+      <Empty title="Nenalezeno">Tahle položka už není k dispozici.</Empty>
+    </div>
+  );
+}

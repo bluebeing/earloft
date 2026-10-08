@@ -1,10 +1,12 @@
 import { useState } from 'preact/hooks';
 import { getPodcast } from '../library';
-import { seekTo, setRate, setSleepTimer, skipBack, skipForward, togglePlay } from '../player';
+import { currentRate, seekChapter, seekTo, setRate, setSleepTimer, skipBack, skipForward, togglePlay } from '../player';
+import { chapterIndexAt, hasTranscript, useChapters } from '../media';
+import { BookmarkButton, showChapters } from './extras';
 import { set, useStore, useTick } from '../store';
 import { formatClock } from '../util';
 import { Artwork, go, showActions, useDismiss } from './common';
-import { ChevronDownIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon } from './icons';
+import { ChevronDownIcon, ListIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon, TextIcon } from './icons';
 
 export function MiniPlayer() {
   const s = useStore();
@@ -54,13 +56,17 @@ export function NowPlaying() {
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
   const visible = s.nowPlayingOpen && !!ep;
   const { ref, closing, close } = useDismiss(() => set({ nowPlayingOpen: false }), visible, true);
+  const chapters = useChapters(visible ? ep : null);
   if (!visible || !ep) return null;
+  const chapterIdx = chapterIndexAt(chapters, s.position);
+  const chapter = chapterIdx >= 0 ? chapters[chapterIdx] : null;
+  const rate = currentRate();
   const pod = getPodcast(ep.podcastId);
   const dur = s.duration || ep.duration || 0;
   const pos = scrub ?? s.position;
 
   const nextRate = () => {
-    const i = RATES.indexOf(s.settings.rate);
+    const i = RATES.indexOf(currentRate());
     setRate(RATES[(i + 1) % RATES.length] ?? 1);
   };
 
@@ -93,6 +99,11 @@ export function NowPlaying() {
           >
             {pod?.title}
           </button>
+          {chapter && (
+            <button class="np-chapter" onClick={() => showChapters(ep, chapters, s.position)}>
+              <ListIcon size={13} /> {chapter.title}
+            </button>
+          )}
         </div>
 
         <div class="np-scrubber">
@@ -129,9 +140,28 @@ export function NowPlaying() {
         </div>
 
         <div class="np-extras">
-          <button class="pill-btn" onClick={nextRate}>
-            {s.settings.rate}×
+          <button class="pill-btn" onClick={nextRate} title="Rychlost">
+            {rate}×
           </button>
+          {chapters.length > 0 && (
+            <button class="pill-btn" onClick={() => showChapters(ep, chapters, s.position)} title="Kapitoly" aria-label="Kapitoly">
+              <ListIcon size={15} />
+            </button>
+          )}
+          {hasTranscript(ep) && (
+            <button
+              class="pill-btn"
+              title="Přepis"
+              aria-label="Přepis"
+              onClick={() => {
+                close();
+                go(`/transcript/${ep.id}`);
+              }}
+            >
+              <TextIcon size={15} />
+            </button>
+          )}
+          <BookmarkButton compact />
           <button
             class="pill-btn"
             onClick={() => {
@@ -141,7 +171,7 @@ export function NowPlaying() {
           >
             Poznámky
           </button>
-          <button class={`pill-btn${sleepLabel ? ' on' : ''}`} onClick={sleepMenu}>
+          <button class={`pill-btn${sleepLabel ? ' on' : ''}`} onClick={sleepMenu} aria-label="Časovač vypnutí">
             <MoonIcon size={14} /> {sleepLabel}
           </button>
         </div>
@@ -156,12 +186,15 @@ export function DesktopPlayer() {
   useTick();
   const [scrub, setScrub] = useState<number | null>(null);
   const ep = s.currentId ? s.episodes.get(s.currentId) : null;
+  const chapters = useChapters(ep);
   if (!ep) return null;
   const pod = getPodcast(ep.podcastId);
   const dur = s.duration || ep.duration || 0;
   const pos = scrub ?? s.position;
+  const chapterIdx = chapterIndexAt(chapters, s.position);
+  const chapter = chapterIdx >= 0 ? chapters[chapterIdx] : null;
   const nextRate = () => {
-    const i = RATES.indexOf(s.settings.rate);
+    const i = RATES.indexOf(currentRate());
     setRate(RATES[(i + 1) % RATES.length] ?? 1);
   };
   const sleepMenu = () =>
@@ -186,6 +219,11 @@ export function DesktopPlayer() {
             <a class="dp-sub" href={`#/podcast/${pod.id}`}>
               {pod.title}
             </a>
+          )}
+          {chapter && (
+            <button class="dp-chapter" onClick={() => showChapters(ep, chapters, s.position)} title="Kapitoly">
+              <ListIcon size={12} /> {chapter.title}
+            </button>
           )}
         </div>
       </div>
@@ -224,8 +262,24 @@ export function DesktopPlayer() {
       </div>
 
       <div class="dp-extras">
+        {chapters.length > 1 && (
+          <>
+            <button class="icon-btn" onClick={() => seekChapter(-1)} title="Předchozí kapitola" aria-label="Předchozí kapitola">
+              <ChevronDownIcon size={20} style={{ transform: 'rotate(90deg)' }} />
+            </button>
+            <button class="icon-btn" onClick={() => seekChapter(1)} title="Další kapitola" aria-label="Další kapitola">
+              <ChevronDownIcon size={20} style={{ transform: 'rotate(-90deg)' }} />
+            </button>
+          </>
+        )}
+        {hasTranscript(ep) && (
+          <a class="pill-btn" href={`#/transcript/${ep.id}`} title="Přepis" aria-label="Přepis">
+            <TextIcon size={15} />
+          </a>
+        )}
+        <BookmarkButton compact />
         <button class="pill-btn" onClick={nextRate} title="Rychlost přehrávání">
-          {s.settings.rate}×
+          {currentRate()}×
         </button>
         <button class={`pill-btn${sleepOn ? ' on' : ''}`} onClick={sleepMenu} title="Časovač vypnutí">
           <MoonIcon size={14} />

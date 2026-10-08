@@ -4,20 +4,23 @@ import { allRecords, dayKey } from '../stats';
 import { useStore } from '../store';
 import type { Episode } from '../types';
 import { CategoryChips, useCategoryFilter } from './categories';
+import { BookmarksView } from './extras';
 import { Artwork, EpisodeRow, Header } from './common';
 import { BackIcon } from './icons';
 
 const VIEW_KEY = 'podcasty.overview';
+type View = 'calendar' | 'stats' | 'bookmarks';
 
 export function Overview() {
-  const [view, setView] = useState<'calendar' | 'stats'>(() => {
+  const [view, setView] = useState<View>(() => {
     try {
-      return localStorage.getItem(VIEW_KEY) === 'stats' ? 'stats' : 'calendar';
+      const v = localStorage.getItem(VIEW_KEY);
+      return v === 'stats' || v === 'bookmarks' ? v : 'calendar';
     } catch {
       return 'calendar';
     }
   });
-  const choose = (v: 'calendar' | 'stats') => {
+  const choose = (v: View) => {
     setView(v);
     try {
       localStorage.setItem(VIEW_KEY, v);
@@ -35,9 +38,12 @@ export function Overview() {
         <button class={view === 'stats' ? 'on' : ''} onClick={() => choose('stats')}>
           Statistiky
         </button>
+        <button class={view === 'bookmarks' ? 'on' : ''} onClick={() => choose('bookmarks')}>
+          Záložky
+        </button>
       </div>
       <div class="fade-swap" key={view}>
-        {view === 'calendar' ? <Calendar /> : <Stats />}
+        {view === 'calendar' ? <Calendar /> : view === 'stats' ? <Stats /> : <BookmarksView />}
       </div>
     </div>
   );

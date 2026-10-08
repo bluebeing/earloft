@@ -1,4 +1,5 @@
-import { getPodcast, getState, markPlayed, markSkipped, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
+import { getPodcast, getState, markPlayed, markSkipped, podSettings, rateFor, updatePodSettings, push, rememberNowPlaying, setQueue, updateEpisodeState, updateSettings } from './library';
+import { cachedChapters, chapterIndexAt, loadChapters } from './media';
 import { flushStats, recordListening } from './stats';
 import { emit, set, state, tick } from './store';
 
@@ -10,6 +11,8 @@ let loadedId: string | null = null;
 let pendingSeek: number | null = null;
 let lastSaved = 0;
 let lastEmit = 0;
+let outroDone = false;
+let chapterIdx = -2;
 /** Poslední pozice pro počítání odposlechnutého času (null = po skoku) */
 let lastTime: number | null = null;
 
@@ -23,12 +26,19 @@ function load(id: string) {
   const ep = state.episodes.get(id);
   if (!ep) return false;
   const st = getState(id);
-  const resumeAt = st && !st.played ? st.position : 0;
+  const intro = podSettings(ep.podcastId).skipIntro ?? 0;
+  let resumeAt = st && !st.played ? st.position : 0;
+  // Přeskočit úvod (znělku), pokud epizoda ještě nebyla rozposlouchaná za něj
+  if (intro && resumeAt < intro) resumeAt = intro;
   loadedId = id;
-  pendingSeek = resumeAt > 5 ? resumeAt : null;
+  outroDone = false;
+  chapterIdx = -2;
+  pendingSeek = resumeAt > 5 || intro ? resumeAt : null;
   audio.src = ep.audioUrl;
-  audio.defaultPlaybackRate = state.settings.rate;
-  audio.playbackRate = state.settings.rate;
+  const rate = rateFor(ep.podcastId);
+  audio.defaultPlaybackRate = rate;
+  audio.playbackRate = rate;
+  void loadChapters(ep);
   set({ currentId: id, position: resumeAt, duration: ep.duration ?? st?.duration ?? 0, buffering: true });
   updateMediaSession();
   return true;
@@ -84,10 +94,28 @@ export const skip = (delta: number) => seekTo((audio.currentTime || state.positi
 export const skipBack = () => skip(-state.settings.skipBack);
 export const skipForward = () => skip(state.settings.skipForward);
 
+/** Změna rychlosti: má-li hrající podcast vlastní rychlost, mění se ta, jinak globální. */
 export function setRate(rate: number) {
   audio.playbackRate = rate;
   audio.defaultPlaybackRate = rate;
-  void updateSettings({ rate });
+  const podcastId = currentEpisode()?.podcastId;
+  if (podcastId && podSettings(podcastId).rate !== undefined) void updatePodSettings(podcastId, { rate });
+  else void updateSettings({ rate });
+}
+
+/** Aktuální rychlost (podle hrajícího podcastu). */
+export const currentRate = () => rateFor(currentEpisode()?.podcastId);
+
+export function seekChapter(delta: 1 | -1) {
+  const ep = currentEpisode();
+  const chapters = ep ? cachedChapters(ep.id) : null;
+  if (!chapters?.length) return;
+  const pos = audio.currentTime || state.position;
+  let i = chapterIndexAt(chapters, pos);
+  // „Předchozí“ v prvních 3 s kapitoly skočí o kapitolu zpět, jinak na její začátek
+  if (delta < 0 && i >= 0 && pos - chapters[i].start < 3) i--;
+  const target = delta > 0 ? chapters[i + 1] : chapters[Math.max(0, i)];
+  if (target) seekTo(target.start);
 }
 
 export function setSleepTimer(minutes: number | 'end' | null) {
@@ -98,7 +126,7 @@ export function setSleepTimer(minutes: number | 'end' | null) {
 
 function saveProgress(force = false) {
   const id = state.currentId;
-  if (!id || loadedId !== id) return;
+  if (!id || loadedId !== id || outroDone) return;
   const pos = audio.currentTime;
   const dur = audio.duration;
   if (!isFinite(pos)) return;
@@ -123,7 +151,7 @@ audio.addEventListener('loadedmetadata', () => {
     audio.currentTime = pendingSeek;
     pendingSeek = null;
   }
-  audio.playbackRate = state.settings.rate;
+  audio.playbackRate = currentRate();
   if (isFinite(audio.duration)) set({ duration: audio.duration });
 });
 
@@ -142,6 +170,23 @@ audio.addEventListener('timeupdate', () => {
     updatePositionState();
   }
   saveProgress();
+  const ep = currentEpisode();
+  // Kapitola na lock screenu
+  const chapters = ep ? cachedChapters(ep.id) : null;
+  if (chapters?.length) {
+    const idx = chapterIndexAt(chapters, audio.currentTime);
+    if (idx !== chapterIdx) {
+      chapterIdx = idx;
+      updateMediaSession(idx >= 0 ? chapters[idx].title : null);
+    }
+  }
+  // Přeskočit závěr: N sekund před koncem epizodu ukončit
+  const outro = ep ? (podSettings(ep.podcastId).skipOutro ?? 0) : 0;
+  if (outro && !outroDone && !audio.paused && isFinite(audio.duration) && audio.duration > outro * 2 && audio.duration - audio.currentTime <= outro) {
+    outroDone = true;
+    finishEpisode();
+    return;
+  }
   if (state.sleepAt && now >= state.sleepAt) {
     audio.pause();
     set({ sleepAt: null });
@@ -161,17 +206,23 @@ audio.addEventListener('pause', () => {
 });
 audio.addEventListener('ratechange', () => {
   // iOS po změně src vrací rychlost na 1 → vrátit nastavenou
-  if (audio.playbackRate !== state.settings.rate && !audio.paused) audio.playbackRate = state.settings.rate;
+  const rate = currentRate();
+  if (audio.playbackRate !== rate && !audio.paused) audio.playbackRate = rate;
 });
-audio.addEventListener('ended', () => {
+audio.addEventListener('ended', () => finishEpisode());
+
+/** Konec epizody (skutečný, nebo po přeskočení závěru): označit přehrané a pustit další z fronty. */
+function finishEpisode() {
   const id = state.currentId;
+  outroDone = true; // pauza níže už nesmí přepsat stav „přehráno“ pozicí
+  if (!audio.ended) audio.pause();
   if (id) markPlayed(id, true);
   if (state.sleepAtEnd) {
     set({ sleepAtEnd: false, playing: false });
     return;
   }
   next();
-});
+}
 audio.addEventListener('error', () => {
   set({ playing: false, buffering: false });
   if (audio.src) window.dispatchEvent(new CustomEvent('podcasty:toast', { detail: 'Epizodu se nepodařilo přehrát' }));
@@ -190,7 +241,7 @@ window.addEventListener('pagehide', () => saveProgress(true));
 // ---------------------------------------------------------------------------
 // Media Session – ovládání ze zamčené obrazovky, AirPods, CarPlay
 
-function updateMediaSession() {
+function updateMediaSession(chapter: string | null = null) {
   if (!('mediaSession' in navigator)) return;
   const ep = currentEpisode();
   if (!ep) return;
@@ -198,7 +249,7 @@ function updateMediaSession() {
   const art = ep.artworkUrl || pod?.artworkUrl;
   navigator.mediaSession.metadata = new MediaMetadata({
     title: ep.title,
-    artist: pod?.title ?? '',
+    artist: chapter ? `${chapter} · ${pod?.title ?? ''}` : (pod?.title ?? ''),
     album: pod?.author ?? '',
     artwork: art ? [{ src: art, sizes: '600x600' }] : [],
   });

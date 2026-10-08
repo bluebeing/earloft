@@ -35,6 +35,10 @@ export interface Episode {
   season: number | null;
   episode: number | null;
   link: string | null;
+  /** Podcasting 2.0: <podcast:chapters url> (JSON) */
+  chaptersUrl?: string | null;
+  /** Podcasting 2.0: <podcast:transcript> */
+  transcripts?: { url: string; type: string }[];
 }
 
 export interface EpisodeState {
@@ -60,6 +64,17 @@ export interface Category {
   id: string;
   name: string;
   podcastIds: string[];
+}
+
+/** Nastavení konkrétního podcastu (přebíjí globální) */
+export interface PodcastSettings {
+  rate?: number;
+  /** přeskočit prvních N sekund (znělka, reklama) */
+  skipIntro?: number;
+  /** ukončit N sekund před koncem */
+  skipOutro?: number;
+  /** nové díly automaticky na konec fronty */
+  autoQueue?: boolean;
 }
 
 export interface Settings {
