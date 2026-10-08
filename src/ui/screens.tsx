@@ -23,7 +23,7 @@ import {
 import { playEpisode, seekTo } from '../player';
 import { toast, useStore } from '../store';
 import type { ApplePodcast, Episode } from '../types';
-import { appleIdFromUrl, formatDate, formatDuration } from '../util';
+import { appleIdFromUrl, formatDate, formatDuration, safeHttpUrl } from '../util';
 import { Artwork, Empty, EpisodeRow, Header, PlayPill, Spinner, episodeActions, go, goBack, showActions } from './common';
 import { CategoryChips, categoryNamesFor, pickCategories, useCategoryFilter } from './categories';
 import { CheckIcon, LockIcon, MoreIcon, PlayIcon, PlusIcon, RefreshIcon } from './icons';
@@ -219,7 +219,7 @@ export function PodcastPage({ id }: { id: string }) {
         label: 'Označit vše jako přehrané',
         onClick: () => (s.byPodcast.get(id) ?? []).forEach((e) => !s.states.get(e.id)?.played && markPlayed(e.id, true)),
       },
-      ...(pod.link ? [{ label: 'Otevřít web podcastu', onClick: () => window.open(pod.link, '_blank', 'noopener') }] : []),
+      ...(safeHttpUrl(pod.link) ? [{ label: 'Otevřít web podcastu', onClick: () => window.open(safeHttpUrl(pod.link)!, '_blank', 'noopener,noreferrer') }] : []),
       {
         label: 'Zrušit odběr',
         destructive: true,

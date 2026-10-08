@@ -9,7 +9,7 @@ export interface Env {
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers },
   });
 
 const err = (status: number, message: string) => json({ error: message }, status);
@@ -99,10 +99,13 @@ async function proxyFeed(req: Request, url: URL): Promise<Response> {
     return err(502, 'Feed se nepodařilo stáhnout');
   }
 
+  // Obsah cizího serveru nikdy nevydávat za HTML z naší domény – jen text se zachovaným kódováním
+  const charset = upstream.headers.get('content-type')?.match(/charset=([w-]+)/i)?.[1] ?? 'utf-8';
   const out = new Headers({
-    'content-type': upstream.headers.get('content-type') ?? 'application/xml',
+    'content-type': `text/plain; charset=${charset}`,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': "default-src 'none'; sandbox",
     'cache-control': 'no-store',
-    'x-final-url': upstream.url,
   });
   const etag = upstream.headers.get('etag');
   const lastMod = upstream.headers.get('last-modified');

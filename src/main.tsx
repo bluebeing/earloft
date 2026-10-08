@@ -65,7 +65,7 @@ function Sidebar() {
     <aside class="sidebar">
       <div class="sb-brand">
         <img src="/icon-192.png" width={30} height={30} alt="" />
-        <span>Podcasty</span>
+        <span>Posluchárna</span>
       </div>
       <nav class="sb-nav">
         {TABS.map(({ path, label, Icon }) => (

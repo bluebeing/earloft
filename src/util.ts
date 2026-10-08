@@ -75,6 +75,17 @@ export async function pool<T>(items: T[], limit: number, fn: (item: T) => Promis
   await Promise.all(workers);
 }
 
+/** Jen http(s) odkazy – hodnoty z RSS jsou nedůvěryhodné (např. javascript: URL). */
+export function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Heuristika: vypadá URL feedu jako soukromá (obsahuje token)? */
 export function looksPrivate(url: string): boolean {
   try {
