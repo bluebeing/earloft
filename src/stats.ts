@@ -12,7 +12,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const monthKey = (d: Date) => `stats-${deviceId()}-${d.getFullYear()}${pad(d.getMonth() + 1)}`;
 
 const FLUSH_INTERVAL_MS = 30000;
-const roundTenth = (n: number) => Math.round(n * 10) / 10;
+/** Zaokrouhluje se až při ukládání součtů – ne po krocích přehrávače (viz recordListening). */
+const roundHundredth = (n: number) => Math.round(n * 100) / 100;
 
 let pending = new Map<string, MonthData>();
 let lastFlush = Date.now();
@@ -29,15 +30,63 @@ export function recordListening(podcastId: string, contentSec: number, wallSec: 
   }
   const day = (month[pad(now.getDate())] ??= {});
   const totals = (day[podcastId] ??= [0, 0]);
-  totals[0] = roundTenth(totals[0] + contentSec);
-  totals[1] = roundTenth(totals[1] + wallSec);
+  // Žádné zaokrouhlování po krocích: přehrávač hlásí ~každých 0,25 s a zaokrouhlení
+  // každého kroku na 0,1 s smazalo rozdíl obsah − reálný čas (ušetřeno rychlostí ≈ 0).
+  totals[0] += contentSec;
+  totals[1] += wallSec;
   if (Date.now() - lastFlush > FLUSH_INTERVAL_MS) flushStats();
 }
 
 export function flushStats() {
   lastFlush = Date.now();
-  for (const [key, value] of pending) void writeKv(key, value);
+  for (const [key, value] of pending) void writeKv(key, roundMonth(value));
   pending = new Map();
+}
+
+function roundMonth(month: MonthData): MonthData {
+  const out: MonthData = {};
+  for (const [dd, pods] of Object.entries(month)) {
+    out[dd] = {};
+    for (const [podcastId, [content, wall]] of Object.entries(pods)) out[dd][podcastId] = [roundHundredth(content), roundHundredth(wall)];
+  }
+  return out;
+}
+
+const REPAIR_FLAG = 'podcasty.statsWallRepair1';
+
+/**
+ * Jednorázová oprava záznamů z doby chyby se zaokrouhlováním: reálný čas byl skoro stejný
+ * jako odposlouchaný obsah i při rychlejším přehrávání. Odhadne se jako obsah ÷ rychlost
+ * podcastu (vlastní, jinak globální). Opravuje jen záznamy tohoto zařízení.
+ */
+export function repairWallTimes(rateFor: (podcastId: string) => number) {
+  try {
+    if (localStorage.getItem(REPAIR_FLAG)) return;
+  } catch {
+    return;
+  }
+  const prefix = `stats-${deviceId()}-`;
+  for (const rec of kvEntries(prefix)) {
+    const month = structuredClone(rec.value as MonthData);
+    let changed = false;
+    for (const pods of Object.values(month)) {
+      for (const [podcastId, totals] of Object.entries(pods)) {
+        const [content, wall] = totals;
+        const rate = rateFor(podcastId);
+        // Jen zjevně poškozené záznamy: rychlost > 1, ale „ušetřeno“ méně než 2 %
+        if (rate > 1 && content > 0 && content - wall < content * 0.02) {
+          pods[podcastId] = [content, roundHundredth(content / rate)];
+          changed = true;
+        }
+      }
+    }
+    if (changed) void writeKv(rec.key, month);
+  }
+  try {
+    localStorage.setItem(REPAIR_FLAG, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface ListenRecord {

@@ -1,7 +1,8 @@
 import { render } from 'preact';
 import { useEffect, useLayoutEffect } from 'preact/hooks';
 import { registerSW } from 'virtual:pwa-register';
-import { NO_CATEGORY, init, refreshAll } from './library';
+import { NO_CATEGORY, init, rateFor, refreshAll } from './library';
+import { repairWallTimes } from './stats';
 import { restoreLastEpisode, skipBack, skipForward, togglePlay } from './player';
 import { readLocal } from './storage';
 import { set, state, useStore } from './store';
@@ -209,6 +210,7 @@ function App() {
 }
 
 void init().then(() => {
+  repairWallTimes(rateFor);
   restoreLastEpisode();
   render(<App />, document.getElementById('app')!);
 });
