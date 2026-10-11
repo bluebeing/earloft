@@ -239,3 +239,81 @@
     max-width: 480px;
   }
 }
+
+/* ---------- Přehrávání na jiném zařízení ---------- */
+
+.remote-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 0.5px solid var(--sep);
+  background: var(--accent-soft);
+  animation: mini-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.remote-progress {
+  position: absolute;
+  left: 0;
+  bottom: -0.5px;
+  height: 2px;
+  background: var(--accent);
+  transition: width 1s linear;
+}
+.remote-text {
+  flex: 1;
+  min-width: 0;
+}
+.remote-device {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.remote-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34c759;
+  animation: remote-pulse 1.6s ease-in-out infinite;
+}
+.remote-title {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.remote-time {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.remote-take {
+  flex: none;
+  background: var(--accent);
+  color: #fff;
+}
+.device-name {
+  border: 0;
+  background: transparent;
+  text-align: right;
+  color: var(--text-2);
+  font-size: 16px;
+  outline: none;
+  min-width: 0;
+  max-width: 60%;
+}
+@keyframes remote-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (min-width: 900px) {
+  .remote-bar {
+    max-width: none;
+    padding: 8px 20px;
+  }
+}

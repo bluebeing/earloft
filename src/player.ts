@@ -16,7 +16,8 @@ import {
 import { cachedChapters, chapterIndexAt, loadChapters } from './media';
 import { flushStats, recordListening } from './stats';
 import { set, state, tick, toast } from './store';
-import { push } from './sync';
+import { publishPresence, takePauseCommand } from './presence';
+import { push, sync } from './sync';
 
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
 const audio = new Audio();
@@ -251,6 +252,7 @@ audio.addEventListener('loadedmetadata', () => {
 });
 
 audio.addEventListener('timeupdate', () => {
+  if (!audio.paused) reportPresence();
   recordListeningStep();
   emitTickThrottled();
   saveProgressThrottled();
@@ -311,6 +313,8 @@ audio.addEventListener('seeking', () => (lastTime = null));
 audio.addEventListener('playing', () => {
   set({ playing: true, buffering: false });
   setPlaybackState('playing');
+  if (!playingSince) playingSince = Date.now();
+  reportPresence(true);
 });
 audio.addEventListener('play', () => {
   set({ playing: true });
@@ -320,6 +324,8 @@ audio.addEventListener('waiting', () => set({ buffering: true }));
 audio.addEventListener('pause', () => {
   set({ playing: false, buffering: false });
   setPlaybackState('paused');
+  playingSince = 0;
+  reportPresence(true);
   updatePositionState();
   lastTime = null;
   flushStats();
@@ -345,7 +351,51 @@ document.addEventListener('visibilitychange', () => {
     void push(true).catch(() => {});
   }
 });
-window.addEventListener('pagehide', saveProgressNow);
+window.addEventListener('pagehide', () => {
+  saveProgressNow();
+  if (audio.paused) reportPresence(true);
+});
+
+// ---------------------------------------------------------------------------
+// „Co hraje kde“ – hlášení stavu pro ostatní zařízení
+
+/** Kdy začalo aktuální přehrávání (pokyny k pauze starší než tohle se ignorují) */
+let playingSince = 0;
+
+function presenceSnapshot() {
+  const ep = currentEpisode();
+  if (!ep) return null;
+  const pod = getPodcast(ep.podcastId);
+  return {
+    episodeId: ep.id,
+    podcastId: ep.podcastId,
+    episodeTitle: ep.title,
+    podcastTitle: pod?.title ?? '',
+    artworkUrl: episodeArtwork(ep),
+    position: audio.currentTime,
+    duration: isFinite(audio.duration) ? audio.duration : (ep.duration ?? 0),
+    rate: audio.playbackRate || 1,
+    playing: !audio.paused,
+  };
+}
+
+/**
+ * Pošle stav ostatním zařízením. Při pravidelném hlášení si zároveň stáhne změny –
+ * tak se dozví i o pokynu k pauze z jiného zařízení („Převzít“).
+ */
+function reportPresence(force = false) {
+  const snapshot = presenceSnapshot();
+  if (!snapshot || !publishPresence(snapshot, force) || !snapshot.playing) return;
+  void sync()
+    .then(() => {
+      const from = takePauseCommand(playingSince);
+      if (from && !audio.paused) {
+        audio.pause();
+        toast(`Pozastaveno – přehrávání převzalo zařízení ${from}`);
+      }
+    })
+    .catch(() => {});
+}
 
 // ---------------------------------------------------------------------------
 // Media Session – ovládání ze zamčené obrazovky, AirPods, CarPlay

@@ -6,6 +6,7 @@ import { set, toast, useStore } from '../store';
 import { resetLocal, sync } from '../sync';
 import { downloadFile, errorMessage } from '../util';
 import { Header, Spinner } from './common';
+import { deviceName, setDeviceName } from '../presence';
 
 export function Settings() {
   const s = useStore();
@@ -81,10 +82,21 @@ export function Settings() {
 
       <h2 class="section-title">Zařízení</h2>
       <div class="form-group">
+        <label class="form-row">
+          <span>Název</span>
+          <input
+            class="device-name"
+            defaultValue={deviceName()}
+            placeholder={deviceName()}
+            onChange={(e) => setDeviceName((e.target as HTMLInputElement).value)}
+            aria-label="Název tohoto zařízení"
+          />
+        </label>
         <button class="form-row link destructive" onClick={logout}>
           Odhlásit toto zařízení
         </button>
       </div>
+      <p class="hint">Pod tímto názvem uvidí ostatní tvá zařízení, že se tu přehrává.</p>
       <p class="hint center">Earloft · {__APP_VERSION__}</p>
     </div>
   );

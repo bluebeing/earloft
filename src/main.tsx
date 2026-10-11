@@ -7,6 +7,8 @@ import { restoreLastEpisode, skipBack, skipForward, togglePlay } from './player'
 import { readLocal } from './storage';
 import { set, state, useStore } from './store';
 import { sync } from './sync';
+import { HEARTBEAT_MS } from './presence';
+import { RemotePlaying } from './ui/remote';
 import { CategoriesPage, CategoryPickerHost, categoryFilterKey } from './ui/categories';
 import { ActionSheetHost, Artwork, NotFound, scrollTargetFor, scroller, useIsDesktop, useRoute } from './ui/common';
 import { PodcastSettingsPage, TranscriptPage, bookmarkHere } from './ui/extras';
@@ -167,7 +169,14 @@ function App() {
     };
     kick();
     document.addEventListener('visibilitychange', kick);
-    return () => document.removeEventListener('visibilitychange', kick);
+    // Dokud je appka vidět, stahovat změny pravidelně – uvidí se tak přehrávání na jiném zařízení
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && !state.playing) void sync().catch(() => {});
+    }, HEARTBEAT_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', kick);
+      clearInterval(poll);
+    };
   }, [s.authed, s.ready]);
 
   // Po přechodu: zpět → kde jsi byl, vpřed → nahoru
@@ -192,6 +201,7 @@ function App() {
         </main>
       </div>
       <div class="bottom-chrome">
+        <RemotePlaying />
         {desktop ? <DesktopPlayer /> : <MiniPlayer />}
         <nav class="tabbar">
           <TabLinks iconSize={24} />
