@@ -21,6 +21,30 @@ import { push } from './sync';
 /** Jediný audio element pro celou appku (iOS si pak drží přehrávání na pozadí). */
 const audio = new Audio();
 audio.preload = 'metadata';
+audio.setAttribute('playsinline', '');
+// Element vložený do stránky iOS spravuje spolehlivěji než odpojený (oprávnění k přehrávání)
+audio.hidden = true;
+if (document.body) document.body.appendChild(audio);
+else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(audio));
+
+/**
+ * iOS: typ audio relace „playback“ = přehrávač médií (ne zvuky stránky).
+ * Pomáhá, aby se po pauze dalo pokračovat ze zamčené obrazovky.
+ */
+function claimAudioSession() {
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  if (!session || session.type === 'playback') return;
+  try {
+    session.type = 'playback';
+  } catch {
+    /* nepodporováno */
+  }
+}
+claimAudioSession();
+
+function setPlaybackState(playbackState: MediaSessionPlaybackState) {
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playbackState;
+}
 
 let loadedId: string | null = null;
 let pendingSeek: number | null = null;
@@ -60,6 +84,7 @@ function load(id: string) {
   outroDone = false;
   chapterIdx = -2;
   pendingSeek = resumeAt > MIN_RESUME_S || intro ? resumeAt : null;
+  audio.preload = 'auto';
   audio.src = ep.audioUrl;
   const rate = rateFor(ep.podcastId);
   audio.defaultPlaybackRate = rate;
@@ -83,6 +108,7 @@ export async function playEpisode(id: string) {
   // Pokud hraje epizoda z fronty, z fronty ji vyřadíme
   if (state.queue.includes(id)) void removeFromQueue(id);
   rememberNowPlaying(id);
+  claimAudioSession();
   try {
     await audio.play();
   } catch (e) {
@@ -282,11 +308,19 @@ function stopIfSleepTimerElapsed() {
 }
 
 audio.addEventListener('seeking', () => (lastTime = null));
-audio.addEventListener('playing', () => set({ playing: true, buffering: false }));
-audio.addEventListener('play', () => set({ playing: true }));
+audio.addEventListener('playing', () => {
+  set({ playing: true, buffering: false });
+  setPlaybackState('playing');
+});
+audio.addEventListener('play', () => {
+  set({ playing: true });
+  setPlaybackState('playing');
+});
 audio.addEventListener('waiting', () => set({ buffering: true }));
 audio.addEventListener('pause', () => {
   set({ playing: false, buffering: false });
+  setPlaybackState('paused');
+  updatePositionState();
   lastTime = null;
   flushStats();
   saveProgressNow();
@@ -341,7 +375,29 @@ function updatePositionState() {
   }
 }
 
-if ('mediaSession' in navigator) {
+/**
+ * Play ze zamčené obrazovky / AirPods. Už načtenou epizodu obnoví hned a synchronně –
+ * iOS u uspané stránky dovolí obnovit načtený zvuk, ale ne začít nové načítání,
+ * a gesto ze systému platí jen chvíli. Zbytek (fronta, stav) proběhne až potom.
+ */
+function resumeFromSystem() {
+  const id = state.currentId;
+  if (!id) return;
+  claimAudioSession();
+  if (loadedId === id) {
+    audio.play().then(
+      () => void playEpisode(id),
+      (e) => {
+        console.warn('Obnovení ze zamčené obrazovky selhalo', e);
+        set({ playing: false, buffering: false });
+        setPlaybackState('paused');
+      },
+    );
+  } else void playEpisode(id);
+}
+
+function registerMediaSession() {
+  if (!('mediaSession' in navigator)) return;
   const setHandler = (action: MediaSessionAction, fn: MediaSessionActionHandler) => {
     try {
       navigator.mediaSession.setActionHandler(action, fn);
@@ -349,7 +405,7 @@ if ('mediaSession' in navigator) {
       /* nepodporovaná akce */
     }
   };
-  setHandler('play', () => state.currentId && void playEpisode(state.currentId));
+  setHandler('play', resumeFromSystem);
   setHandler('pause', () => audio.pause());
   setHandler('seekbackward', (d) => skip(-(d.seekOffset || state.settings.skipBack)));
   setHandler('seekforward', (d) => skip(d.seekOffset || state.settings.skipForward));
@@ -358,6 +414,19 @@ if ('mediaSession' in navigator) {
   setHandler('previoustrack', skipBack);
   setHandler('nexttrack', skipForward);
 }
+registerMediaSession();
+
+/** iOS umí relaci médií na pozadí zahodit – po návratu ji znovu nastavíme. */
+function reassertMediaSession() {
+  if (!currentEpisode()) return;
+  claimAudioSession();
+  registerMediaSession();
+  updateMediaSession(chapterIdx >= 0 ? (cachedChapters(state.currentId!)?.[chapterIdx]?.title ?? null) : null);
+  updatePositionState();
+  setPlaybackState(audio.paused ? 'paused' : 'playing');
+}
+document.addEventListener('visibilitychange', reassertMediaSession);
+window.addEventListener('pageshow', reassertMediaSession);
 
 /** Po startu appky zobrazit v mini-přehrávači naposledy hranou epizodu (bez přehrávání). */
 export function restoreLastEpisode() {
