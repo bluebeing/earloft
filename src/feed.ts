@@ -35,10 +35,12 @@ const parseInteger = (v: string) => (/^\d+$/.test(v) ? Number(v) : null);
 const UNTITLED = 'Bez názvu';
 const SUMMARY_MAX_LENGTH = 300;
 
-export function parseFeed(xml: string, podcastId: string): ParsedFeed {
+/** Kdy uživatel s epizodou naposledy něco dělal (poslech, přehráno…), nebo undefined. */
+export type LastTouched = (episodeId: string) => number | undefined;
+
+export function parseFeed(xml: string, podcastId: string, lastTouched?: LastTouched): ParsedFeed {
   const channel = parseChannel(xml);
-  const episodes: Episode[] = [];
-  const notes = new Map<string, string>();
+  const items: ParsedItem[] = [];
   const seen = new Set<string>();
 
   for (const item of childrenNamed(channel, 'item')) {
@@ -46,8 +48,14 @@ export function parseFeed(xml: string, podcastId: string): ParsedFeed {
     // Bez audia to není epizoda; u duplicitního GUID platí první výskyt
     if (!parsed || seen.has(parsed.episode.id)) continue;
     seen.add(parsed.episode.id);
-    episodes.push(parsed.episode);
-    if (parsed.notes) notes.set(parsed.episode.id, parsed.notes);
+    items.push(parsed);
+  }
+
+  const episodes: Episode[] = [];
+  const notes = new Map<string, string>();
+  for (const it of mergeFormatTwins(items, lastTouched)) {
+    episodes.push(it.episode);
+    if (it.notes) notes.set(it.episode.id, it.notes);
   }
   episodes.sort((a, b) => b.pubDate - a.pubDate);
 
@@ -73,8 +81,57 @@ function parseChannel(xml: string): Element {
 const channelArtwork = (channel: Element) =>
   childNamed(channel, 'itunes:image')?.getAttribute('href') || childNamed(channel, 'image')?.getElementsByTagName('url')[0]?.textContent?.trim() || null;
 
+interface ParsedItem {
+  episode: Episode;
+  notes: string;
+  /** velikost souboru v bajtech (enclosure length), pokud ji feed uvádí */
+  size: number;
+}
+
+// ---------------------------------------------------------------------------
+// Stejný díl ve více formátech
+//
+// Některé feedy (např. Patreon) dávají každý díl dvakrát – jako MP3 a jako M4A,
+// s různým GUID, stejným názvem a délkou, vydané pár sekund po sobě. Pro posluchače
+// je to jedna epizoda, takže z dvojice necháme jednu.
+
+const TWIN_MAX_PUBLISH_GAP_MS = 6 * 3600 * 1000;
+const TWIN_MAX_DURATION_DIFF_S = 10;
+
+const twinKey = (title: string) => title.toLocaleLowerCase('cs').replace(/\s+/g, ' ').trim();
+
+function areFormatTwins(a: Episode, b: Episode): boolean {
+  if (Math.abs(a.pubDate - b.pubDate) > TWIN_MAX_PUBLISH_GAP_MS) return false;
+  if (a.duration == null || b.duration == null) return true;
+  return Math.abs(a.duration - b.duration) <= TWIN_MAX_DURATION_DIFF_S;
+}
+
+/**
+ * Kterou verzi nechat: tu, se kterou uživatel naposledy pracoval (aby nezmizel poslech
+ * ani „přehráno“); jinak menší soubor (šetří data).
+ */
+function isPreferredTwin(candidate: ParsedItem, current: ParsedItem, lastTouched?: LastTouched): boolean {
+  const touchedCandidate = lastTouched?.(candidate.episode.id) ?? 0;
+  const touchedCurrent = lastTouched?.(current.episode.id) ?? 0;
+  if (touchedCandidate !== touchedCurrent) return touchedCandidate > touchedCurrent;
+  return (candidate.size || Infinity) < (current.size || Infinity);
+}
+
+function mergeFormatTwins(items: ParsedItem[], lastTouched?: LastTouched): ParsedItem[] {
+  const byTitle = new Map<string, ParsedItem[]>();
+  for (const it of items) {
+    const key = twinKey(it.episode.title);
+    const group = byTitle.get(key) ?? [];
+    const twinIndex = group.findIndex((g) => areFormatTwins(g.episode, it.episode));
+    if (twinIndex < 0) group.push(it);
+    else if (isPreferredTwin(it, group[twinIndex], lastTouched)) group[twinIndex] = it;
+    byTitle.set(key, group);
+  }
+  return [...byTitle.values()].flat();
+}
+
 /** Jedna položka feedu → epizoda a její poznámky (HTML). Položka bez audia vrátí null. */
-function parseItem(item: Element, podcastId: string): { episode: Episode; notes: string } | null {
+function parseItem(item: Element, podcastId: string): ParsedItem | null {
   const enclosure = childNamed(item, 'enclosure');
   const audioUrl = enclosure?.getAttribute('url')?.trim();
   if (!audioUrl) return null;
@@ -83,6 +140,7 @@ function parseItem(item: Element, podcastId: string): { episode: Episode; notes:
   const pubDate = Date.parse(childText(item, 'pubdate'));
   return {
     notes,
+    size: Number(enclosure?.getAttribute('length')) || 0,
     episode: {
       id: episodeIdFor(podcastId, guid),
       podcastId,

@@ -43,7 +43,7 @@ interface FetchResult {
 }
 
 /** Zvýšit při změně parseru – vynutí nové zpracování všech feedů. */
-const PARSER_VERSION = 2;
+const PARSER_VERSION = 3;
 const AUTO_QUEUE_MAX_AGE_MS = 7 * 86400000;
 
 /** Pustí prohlížeč ke slovu (vykreslení, dotyk) před náročnou prací. */
@@ -63,7 +63,7 @@ async function fetchFeed(feedUrl: string, podcastId: string, cached?: Podcast): 
   const contentHash = `${PARSER_VERSION}:${text.length}:${hashId(text)}`;
   if (cached?.contentHash === contentHash) return { etag, lastModified, contentHash };
   await yieldToMain();
-  return { parsed: parseFeed(text, podcastId), etag, lastModified, contentHash };
+  return { parsed: parseFeed(text, podcastId, (id) => state.states.get(id)?.updatedAt), etag, lastModified, contentHash };
 }
 
 function storeEpisodes(podcastId: string, episodes: Episode[]) {
