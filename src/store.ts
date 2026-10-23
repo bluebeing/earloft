@@ -26,6 +26,8 @@ export interface AppState {
   sleepAt: number | null;
   sleepAtEnd: boolean;
   nowPlayingOpen: boolean;
+  /** zvuk jde jinam než do výchozího výstupu (AirPlay, zvolené zařízení) */
+  outputActive: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = { rate: 1, skipBack: 15, skipForward: 30 };
@@ -53,6 +55,7 @@ export const state: AppState = {
   sleepAt: null,
   sleepAtEnd: false,
   nowPlayingOpen: false,
+  outputActive: false,
 };
 
 const listeners = new Set<() => void>();

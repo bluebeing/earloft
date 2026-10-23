@@ -6,7 +6,8 @@ import { set, state, useStore, useTick } from '../store';
 import { formatClock } from '../util';
 import { Artwork, go, showActions, useDismiss } from './common';
 import { BookmarkButton, showChapters } from './extras';
-import { ChevronDownIcon, ListIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon, TextIcon } from './icons';
+import { chooseOutput, outputKind } from '../output';
+import { AirPlayIcon, ChevronDownIcon, ListIcon, MoonIcon, PauseIcon, PlayIcon, SkipIcon, TextIcon } from './icons';
 
 const openNowPlaying = () => set({ nowPlayingOpen: true });
 
@@ -166,6 +167,8 @@ export function NowPlaying() {
             </button>
           )}
           <BookmarkButton compact />
+        <OutputButton active={s.outputActive} />
+          <OutputButton active={s.outputActive} />
           <button class="pill-btn" onClick={() => closeAndGo(`/episode/${ep.id}`)}>
             Poznámky
           </button>
@@ -260,5 +263,18 @@ export function DesktopPlayer() {
         </button>
       </div>
     </div>
+  );
+}
+
+const OUTPUT_TITLES = { airplay: 'AirPlay a sluchátka', sink: 'Zvukový výstup', remote: 'Přehrát na zařízení' } as const;
+
+/** Výběr, kam jde zvuk (AirPlay/Bluetooth na iPhonu, zvukové zařízení na počítači, Chromecast na Androidu). */
+function OutputButton({ active }: { active: boolean }) {
+  const kind = outputKind();
+  if (!kind) return null;
+  return (
+    <button class={`pill-btn${active ? ' on' : ''}`} onClick={() => void chooseOutput()} title={OUTPUT_TITLES[kind]} aria-label={OUTPUT_TITLES[kind]}>
+      <AirPlayIcon size={15} />
+    </button>
   );
 }

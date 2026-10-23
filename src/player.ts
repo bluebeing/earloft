@@ -23,6 +23,11 @@ import { push, sync } from './sync';
 const audio = new Audio();
 audio.preload = 'metadata';
 audio.setAttribute('playsinline', '');
+// AirPlay (Safari): povolit odeslání zvuku na Apple TV / reproduktory
+audio.setAttribute('x-webkit-airplay', 'allow');
+
+/** Audio element přehrávače (pro výběr výstupu). */
+export const audioElement = () => audio;
 // Element vložený do stránky iOS spravuje spolehlivěji než odpojený (oprávnění k přehrávání)
 audio.hidden = true;
 if (document.body) document.body.appendChild(audio);
