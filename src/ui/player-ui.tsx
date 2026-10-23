@@ -167,7 +167,6 @@ export function NowPlaying() {
             </button>
           )}
           <BookmarkButton compact />
-        <OutputButton active={s.outputActive} />
           <OutputButton active={s.outputActive} />
           <button class="pill-btn" onClick={() => closeAndGo(`/episode/${ep.id}`)}>
             Poznámky
@@ -252,6 +251,7 @@ export function DesktopPlayer() {
           </a>
         )}
         <BookmarkButton compact />
+        <OutputButton active={s.outputActive} />
         <button class="pill-btn" onClick={cycleRate} title="Rychlost přehrávání">
           {currentRate()}×
         </button>
