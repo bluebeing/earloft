@@ -62,8 +62,12 @@ let chapterIdx = -2;
 /** Poslední pozice pro počítání odposlechnutého času (null = po skoku) */
 let lastTime: number | null = null;
 
-/** Od jaké části epizody se počítá jako přehraná */
-const PLAYED_THRESHOLD = 0.95;
+/**
+ * Kolik sekund před koncem se epizoda bere jako dohraná. Pevný počet sekund, ne procenta –
+ * dřív 95 % délky u dvouhodinového dílu znamenalo posledních 6 minut: díl se označil jako
+ * přehraný s pozicí 0 a po znovuotevření začal od začátku.
+ */
+const FINISHED_REMAINING_S = 30;
 const SAVE_INTERVAL_MS = 10000;
 const TICK_INTERVAL_MS = 500;
 /** Delší posun mezi dvěma `timeupdate` je skok, ne poslech */
@@ -221,8 +225,8 @@ function currentProgress() {
   const dur = audio.duration;
   if (!isFinite(pos)) return null;
   lastSaved = Date.now();
-  const played = isFinite(dur) && dur > 0 && pos / dur >= PLAYED_THRESHOLD;
-  return { id, patch: { position: played ? 0 : pos, duration: isFinite(dur) ? dur : null, played } };
+  const finished = isFinite(dur) && dur > 0 && dur - pos <= FINISHED_REMAINING_S;
+  return { id, patch: { position: finished ? 0 : pos, duration: isFinite(dur) ? dur : null, played: finished } };
 }
 
 function playNextInQueue() {
